@@ -39,3 +39,5 @@
 
 # Files
 .DS_Store
+libraries/mujoco
+model/
