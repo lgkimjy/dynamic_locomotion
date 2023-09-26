@@ -54,10 +54,11 @@ constexpr double g_const = 9.81;
 // #define ROBOT3		//	Dual Arm : Dual Arm w Fixed-base & Fixed Torso
 // #define ROBOT4		//  KIST 6-DoF Arm & Hand
 // #define ROBOT5		//  KIST 7-DoF Dual Arm + Hand/Gripper w Torso
-#define ROBOT6       //  MAHRU-WL
+// #define ROBOT6       //  MAHRU-WL
 // #define ROBOT7       //  KIST Hand
 // #define ROBOT8		//	Unitree A1(quadrupted robot) axis is x,y,z
 // #define ROBOT9       //  Baxter Robot
+#define ROBOT10      //  Template Model, 2DoF Hip + 1 Prismatic Joint for Each leg
 
 
 
@@ -207,8 +208,21 @@ constexpr int NO_OF_ENDEFFECTOR = DOF_FINGER;
 constexpr int ACTIVE_DOF = (NO_OF_HAND * DOF_HAND + NO_OF_ARM * DOF_ARM + DOF_HEAD);
 constexpr int NO_OF_BODY = ACTIVE_DOF;
 
-#endif
+/////
+/////	Template Model, 2DoF Hip + 1 Prismatic Joint for Each leg
+/////
+#elif defined(ROBOT10)
+constexpr int NO_OF_BASEBODY = 1;					  	            //	Number of floating/fixed body
+constexpr int NO_OF_LEG = 2;							            //	Number of legs
+constexpr int DOF_LEG = 3;								            //	DOF of each limb
 
+//	���� var.�� �ǹ� ����(�׳� ���� ������...) �Ʒ� var.�� code���� ���~~~
+#define _FLOATING_BASE
+constexpr int NO_OF_ENDEFFECTOR = NO_OF_LEG;			        	//	Number of end-effector
+constexpr int ACTIVE_DOF = DOF_LEG * NO_OF_LEG;                     //  = mjModel->njnt - 1 (Floaing-base body)
+constexpr int NO_OF_BODY = (NO_OF_BASEBODY + ACTIVE_DOF);           //  = mjModel->nbody - 1
+
+#endif
 
 ///////////////////////////////////////////////////////////////////////////
 #ifdef _FLOATING_BASE

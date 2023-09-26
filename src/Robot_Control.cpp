@@ -11,7 +11,6 @@ CRobotControl::CRobotControl() : count_sim(0), count_ctrl(0), CtrlFlag(0), TaskF
 
 	joint_torq.setZero();
 
-
 	no_of_EE = 0;
 	id_body_EE.clear();
 
@@ -62,7 +61,6 @@ void CRobotControl::initEEParameters(const mjModel* model)
 	Eigen::Vector3d temp_vec;
 	Eigen::Vector4d temp_quat;
 
-
 	//////////	Get body ID for end-effectors (defined in XML file via model->site !)
 	no_of_EE = model->nsite;
 
@@ -109,7 +107,6 @@ void CRobotControl::initEEParameters(const mjModel* model)
 		Jdotr_EE[i].setZero();
 	}
 }
-
 
 
 void CRobotControl::outputEEInformation()
@@ -269,7 +266,44 @@ void CRobotControl::getFeedbackInformation(const mjData* data)
 
 void CRobotControl::computeControlInput()
 {
-	// joint_torq = K_qp * (0.0 - robot.q) + K_qv * (0.0 - robot.qdot);
+	// std::cout << "------------------------------------------------------" << std::endl;
+
+	// @todo : 0) gait switcher & scheduler
+	// left_contact, right contact -> contact check
+	
+	// @todo : 1) Walking Pattern Generation
+	//	* Raibert heuristic ( gait scheduler )
+	//	* or DCM-based Pattern Generation
+	// outputs: des_acc_com, swing trajectory
+	
+	// @todo : 2) Centroidal Dynamics Ground Reaction Force Deployment, CoM Dynamics
+	// A = 
+	// b_d = 
+	// alpha = 
+	
+	// @todo : 3) Balance Control ( QP solve )
+	// define objective function
+	// define inequality
+	// define equality
+	// solve qp
+	// f_qp = 
+
+	// @todo : 4) KinWBC ( Task Priority-based Control )
+	// q_d = 
+	// qdot_d = 
+	// qddot_d = 
+
+	// @todo : 5) DynWBC
+	// Solve QP, get delta 
+	// qddot_d +=  qddot_delta
+	// F_C = f_qp + f_delta
+	// torq_ff = M_mat_q * xi_ddot_C + C_mat_q * robot.xidot + g_vec_q;
+	// for(int i=0; i < # of contact; i++) {
+	//	 joint_torq += J_C * F_C;
+	// }
+
+	// @todo : 6) Joint Level Controller
+	// joint_torq = torq_ff + K_qp * (q_d - robot.q) + K_qv * (qdot_d - robot.qdot);
 }
 
 

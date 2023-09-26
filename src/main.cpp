@@ -470,6 +470,8 @@ int main(int argc, const char** argv) {
 	const char* filename = "../model/Unitree-A1/A1.xml";
 #elif defined(ROBOT9)
 	const char* filename = "../model/Baxter/Baxter.xml";
+#elif defined(ROBOT10)
+  const char* filename = "../model/template_timing_torque.xml";
 #endif
 ////////////////////////////// USER CODE : END //////////////////////////////
 

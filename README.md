@@ -1,22 +1,39 @@
-# MuJoCo_ARBML
+# Dynamic Locomotion
 
-### MuJoCo Template Repository using ARBML library
-* Articulated Rigid-Body Motion Library ( ARBML )
+Robot Walking in desired velocity (optimal DCM + task-prioritized + KinWBC + DynWBC)
 
-### Instructions
-```console
-// clone repo and submodule recursively
-$ git clone --recursive https://github.com/HumanoidRoboticsLab/template_arbml.git
-// use it, if you want to update the submodule to the latest commit
-$ git submodule update --remote
+### TODO
+- [ ] Nominal Gait Planning (DCM *or* Raibert Heuristic)
+  - [ ] Swing Foot Trajectory Generator
+  - [ ] CoM Trajectory Generator
+- [ ] Reaction Force Deployment
+- [ ] KinWBC
+  - [ ] Task-Prioritized ( 4tasks )
+- [ ] DynWBC
+  - [ ] QP formulation
+  - [ ] find $\delta_{\ddot{q}}$ and $\delta_{f}$
+- [ ] Joint Level Controller
 
-$ mkdir model # or 
-$ git clone https://github.com/HumanoidRoboticsLab/model.git
-
-// Follow instructions explained in libraries dir README.md first
-$ mkdir build && cd build
-$ cmake ..
-$ make -j16
-
-$ ./bin/simulate or ./bin/template
+### Reference
+```
+@inproceedings{khadiv2016step,
+  title={Step timing adjustment: A step toward generating robust gaits},
+  author={Khadiv, Majid and Herzog, Alexander and Moosavian, S Ali A and Righetti, Ludovic},
+  booktitle={2016 IEEE-RAS 16th International Conference on Humanoid Robots (Humanoids)},
+  pages={35--42},
+  year={2016},
+  organization={IEEE}
+}
+```
+```
+@article{kim2020dynamic,
+  title={Dynamic locomotion for passive-ankle biped robots and humanoids using whole-body locomotion control},
+  author={Kim, Donghyun and Jorgensen, Steven Jens and Lee, Jaemin and Ahn, Junhyeok and Luo, Jianwen and Sentis, Luis},
+  journal={The International Journal of Robotics Research},
+  volume={39},
+  number={8},
+  pages={936--956},
+  year={2020},
+  publisher={SAGE Publications Sage UK: London, England}
+}
 ```

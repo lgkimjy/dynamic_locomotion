@@ -1,13 +1,11 @@
-//
-//
 #pragma once
 
 #include <chrono>
 #include <fstream>
+
 #include "ARBMLlib/ARBML.h"
-//#include "PathPoint/jointPathPoint.h"
-//#include "PathPoint/taskPosPathPoint.h"
-//#include "PathPoint/taskOriPathPoint.h"
+#include "Contact/ContactWrenchCone.h"
+#include "Trajectory/Trajectory.h"
 
 using namespace std;
 
@@ -29,14 +27,12 @@ enum control_list
 };
 
 
-
 //	Task List
 enum task_list
 {
 	noControlSubtask = 0,
 	task_standing
 };
-
 
 
 class CRobotControl
