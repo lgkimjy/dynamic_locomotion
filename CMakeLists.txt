@@ -85,12 +85,25 @@ set(ARBML_SRC
   include/ARBMLlib/ARBML.cpp
   include/ARBMLlib/RigidBody.cpp
 )
+set(CONTACT_SRC 
+  include/Contact/ContactWrenchCone.cpp
+  include/Contact/FrictionCone.cpp
+)
+set(WPG_SRC 
+  include/WalkingPatternGeneration/WalkingPatternGeneration.cpp
+)
+set(TRAJ_SRC 
+  include/Trajectory/Trajectory.cpp
+)
 
 add_executable(template 
   src/main.cpp 
   src/Robot_Control.cpp 
   ${SIMULATE_RESOURCE_FILES} 
   ${ARBML_SRC}
+  ${CONTACT_SRC}
+  ${WPG_SRC}
+  ${TRAJ_SRC}
 )
 target_include_directories(template PUBLIC
   ${CMAKE_SOURCE_DIR}/include

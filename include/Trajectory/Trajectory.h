@@ -1,9 +1,25 @@
 #include <Eigen/Dense>
 
-class Trajectory
+class QuinticTrajecotryProfile
 {
-    Trajectory();
-    ~Trajectory();
+public:
+    QuinticTrajecotryProfile() {};
+    ~QuinticTrajecotryProfile() {};
 
-    Eigen::Matrix<double, 6, 1> quintic_trajectory_generation(Eigen::Vector3d initial_pos, Eigen::Vector3d final_pos, double initial_time, double final_time);
+    bool is_moving_flag = false;
+    double initial_time = 0.0;
+    double final_time = 0.0;
+    double moving_time = 0.0;
+    Eigen::Matrix<double, 6, 1> coeff;
+
+    double pos = 0.0;
+    double vel = 0.0;
+    double acc = 0.0;
+
+    void set_duration(double duration);
+    void quintic_trajectory_generation(Eigen::Vector3d initial_state, Eigen::Vector3d final_state);
+    void compute();
+    double get_pos();
+    double get_vel();
+    double get_acc();
 };

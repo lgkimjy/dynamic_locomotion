@@ -6,6 +6,7 @@
 #include "ARBMLlib/ARBML.h"
 #include "Contact/ContactWrenchCone.h"
 #include "Trajectory/Trajectory.h"
+#include "WalkingPatternGeneration/WalkingPatternGeneration.h"
 
 using namespace std;
 
@@ -33,6 +34,14 @@ enum task_list
 	noControlSubtask = 0,
 	task_standing
 };
+
+// Gait State
+typedef enum{
+  SINGLE_STANCE     = 0X00,
+  RIGHT_CONTACT     = 0X01, // right leg contact (double: 1)
+  LEFT_CONTACT      = 0X02, // left leg contact (double: 2)
+  DOUBLE_STANCE     = 0X03, // both leg contact
+}stateMachineTypeDef;
 
 
 class CRobotControl
@@ -90,10 +99,51 @@ public:
 	vector<Eigen::Matrix<double, DOF3, TOTAL_DOF>>		Jdotr_EE;			//	Time derivative of Jr_EE
 
 
+	///////////////////////////////////////////////////////////////////////////
+	// Command on Robot
+	Eigen::Vector3d		des_lin_vel; // desired linear velocity of the robot
+	Eigen::Vector3d		des_ang_vel; // desired angular velocity of the robot
+	double sim_time;
+	double prev_sim_time;
+
+	stateMachineTypeDef stateMachine;
+	stateMachineTypeDef prev_state;
+
+	// Walking Pattern Generation
+	WalkingPatternGeneration	WPG;
+	double step_time;
+	Eigen::Vector3d des_com_pos;
+	Eigen::Vector3d des_com_vel;
+	Eigen::Vector3d des_com_acc;
+
+	// Trajectory Generation
+	QuinticTrajecotryProfile	swing_foot_traj_x;
+	QuinticTrajecotryProfile	swing_foot_traj_y;
+	vector<Eigen::Vector3d>		prev_p_EE_d;
+	vector<Eigen::Vector3d>		p_EE_d;
+	vector<Eigen::Vector3d>		pdot_EE_d;
+
+	// CoM Dyanmics
+	Eigen::Matrix<double, 6, 6> 	A;
+	Eigen::Matrix<double, 6, 1> 	b_d;
+	Eigen::Matrix<double, 6, 6>		f;
+	Eigen::Matrix<double, 6, 1> 	rho;
+	Eigen::Matrix<double, 6, 6> 	G;
+	Eigen::Matrix<double, 6, 1> 	g0;
+	Eigen::Matrix<double, 12, 12>	Ce;
+	Eigen::Matrix<double, 12, 1>	ce;
+	Eigen::Matrix<double, 12, 12>	Ci;
+	Eigen::Matrix<double, 12, 1>	ci;
+
+	// Contact
+	CContactWrenchCone	ContactWrench;
+
+
 	//////////	Functions	//////////
 	void InitializeSystem(const mjModel* model_mj);
 	void initEEParameters(const mjModel* model);
 	void initCtrlParameters(const mjModel* model_mj);
+	void initLocomotionVariables();
 	void outputEEInformation();
 
 	void UserControl(mjModel* uModel, mjData* uData);

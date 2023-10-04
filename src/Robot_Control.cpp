@@ -43,6 +43,9 @@ void CRobotControl::InitializeSystem(const mjModel* model_mj)
 	/////	Set controller parameters
 	initCtrlParameters(model_mj);
 
+	/////	Set locomotion parameters
+	initLocomotionVariables();
+
 #ifdef PRINT_END_EFFECTOR_INFO
 	outputEEInformation();
 #endif
@@ -152,7 +155,12 @@ void CRobotControl::initCtrlParameters(const mjModel* model_mj)
 	//cout << "Control Flag : " << CtrlFlag << endl;
 }
 
-
+void CRobotControl::initLocomotionVariables()
+{
+	des_lin_vel.setZero();
+	des_ang_vel.setZero();
+	step_time = 0.0;
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 //	USER Control Core !!
@@ -266,34 +274,79 @@ void CRobotControl::getFeedbackInformation(const mjData* data)
 
 void CRobotControl::computeControlInput()
 {
-	// std::cout << "------------------------------------------------------" << std::endl;
+	///////////////////////////////////////////////////////////////////////////
+    /*  step cycle  */
+	///////////////////////////////////////////////////////////////////////////
+	/////// @todo : 1) gait switcher & scheduler
+	/////// @todo : 2) Walking Pattern Generation
+	if(sim_time - prev_sim_time > step_time)
+	{
+        std::cout << "--------------------------------------------------------" << std::endl;
+        std::cout << "STEP CYCLE" << std::endl;
 
-	// @todo : 0) gait switcher & scheduler
-	// left_contact, right contact -> contact check
-	
-	// @todo : 1) Walking Pattern Generation
-	//	* Raibert heuristic ( gait scheduler )
-	//	* or DCM-based Pattern Generation
-	// outputs: des_acc_com, swing trajectory
-	
-	// @todo : 2) Centroidal Dynamics Ground Reaction Force Deployment, CoM Dynamics
+		swing_foot_traj_x.moving_time = 0.0;
+		swing_foot_traj_y.moving_time = 0.0;
+
+		prev_sim_time = sim_time;
+
+		WPG.specifying_nominal_values();
+		step_time = WPG.nominal_T;
+
+		if(prev_state == LEFT_CONTACT)
+		{
+			// LEFT SWING
+            stateMachine = RIGHT_CONTACT;
+			swing_foot_traj_x.set_duration(step_time);
+			swing_foot_traj_y.set_duration(step_time);
+			// swing_foot_traj_x.quintic_trajectory_generation();
+			// swing_foot_traj_y.quintic_trajectory_generation();
+		}
+        else
+		{
+			// RIGHT SWING
+            stateMachine = LEFT_CONTACT;
+			swing_foot_traj_x.set_duration(step_time);
+			swing_foot_traj_y.set_duration(step_time);
+			// swing_foot_traj_x.quintic_trajectory_generation();
+			// swing_foot_traj_y.quintic_trajectory_generation();
+		}
+
+	}
+	// WPG.update_qp_param();
+	// WPG.online_foot_time_placement();
+	// WPG.online_swing_foot_trajectory();
+	// WPG.com_trajectory_generation();
+
+	swing_foot_traj_x.moving_time = sim_time - prev_sim_time;
+	swing_foot_traj_y.moving_time = sim_time - prev_sim_time;
+
+	swing_foot_traj_x.compute();
+	swing_foot_traj_y.compute();
+
+	p_EE_d[0](0) = swing_foot_traj_x.get_pos();
+	p_EE_d[0](1) = swing_foot_traj_y.get_pos();
+	p_EE_d[0](1) = swing_foot_traj_y.get_pos();
+	// dcm_traj = ;
+	// des_com_traj = ;
+
+	///////////////////////////////////////////////////////////////////////////
+    /*  control cycle   */
+    ///////////////////////////////////////////////////////////////////////////
+	/////// @todo : 3) Centroidal Dynamics Ground Reaction Force Deployment, CoM Dynamics, Balance Control ( QP solve )
 	// A = 
 	// b_d = 
 	// alpha = 
-	
-	// @todo : 3) Balance Control ( QP solve )
 	// define objective function
 	// define inequality
 	// define equality
 	// solve qp
 	// f_qp = 
 
-	// @todo : 4) KinWBC ( Task Priority-based Control )
-	// q_d = 
-	// qdot_d = 
-	// qddot_d = 
-
-	// @todo : 5) DynWBC
+	/////// @todo : 4) KinWBC ( Task Priority-based Control )
+	// qpos_d = 
+	// qvel_d = 
+	// qacc_d = 
+	/////// @todo : 5) DynWBC
 	// Solve QP, get delta 
 	// qddot_d +=  qddot_delta
 	// F_C = f_qp + f_delta
@@ -301,9 +354,8 @@ void CRobotControl::computeControlInput()
 	// for(int i=0; i < # of contact; i++) {
 	//	 joint_torq += J_C * F_C;
 	// }
-
-	// @todo : 6) Joint Level Controller
-	// joint_torq = torq_ff + K_qp * (q_d - robot.q) + K_qv * (qdot_d - robot.qdot);
+	/////// @todo : 6) Joint Level Controller
+	// joint_torq = torq_ff + K_qp * (qpos_d - robot.q) + K_qv * (qvel_d - robot.qdot);
 }
 
 
