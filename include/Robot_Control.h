@@ -112,9 +112,9 @@ public:
 	// Walking Pattern Generation
 	WalkingPatternGeneration	WPG;
 	double step_time;
-	Eigen::Vector3d des_com_pos;
-	Eigen::Vector3d des_com_vel;
-	Eigen::Vector3d des_com_acc;
+	Eigen::Vector3d desired_com_pos;
+	Eigen::Vector3d desired_com_vel;
+	Eigen::Vector3d desired_com_acc;
 
 	// Trajectory Generation
 	QuinticTrajecotryProfile	swing_foot_traj_x;
@@ -124,10 +124,12 @@ public:
 	vector<Eigen::Vector3d>		pdot_EE_d;
 
 	// CoM Dyanmics
+	Eigen::Matrix<double, 6, 6>		S;		// Weighting matrix for CoM dynamics
+	Eigen::Matrix<double, 6, 1>		alpha;	// Weighting matrix for CoM dynamics
 	Eigen::Matrix<double, 6, 6> 	A;
 	Eigen::Matrix<double, 6, 1> 	b_d;
 	Eigen::Matrix<double, 6, 6>		f;
-	Eigen::Matrix<double, 6, 1> 	rho;
+	Eigen::Matrix<double, 12, 1> 	opt_rho;
 	Eigen::Matrix<double, 6, 6> 	G;
 	Eigen::Matrix<double, 6, 1> 	g0;
 	Eigen::Matrix<double, 12, 12>	Ce;

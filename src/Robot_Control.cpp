@@ -274,58 +274,60 @@ void CRobotControl::getFeedbackInformation(const mjData* data)
 
 void CRobotControl::computeControlInput()
 {
+	std::cout << "--------------------------------------------------------" << std::endl;
+
 	///////////////////////////////////////////////////////////////////////////
     /*  step cycle  */
 	///////////////////////////////////////////////////////////////////////////
 	/////// @todo : 1) gait switcher & scheduler
 	/////// @todo : 2) Walking Pattern Generation
-	if(sim_time - prev_sim_time > step_time)
-	{
-        std::cout << "--------------------------------------------------------" << std::endl;
-        std::cout << "STEP CYCLE" << std::endl;
+	// if(sim_time - prev_sim_time > step_time)
+	// {
+    //     std::cout << "--------------------------------------------------------" << std::endl;
+    //     std::cout << "STEP CYCLE" << std::endl;
 
-		swing_foot_traj_x.moving_time = 0.0;
-		swing_foot_traj_y.moving_time = 0.0;
+	// 	swing_foot_traj_x.moving_time = 0.0;
+	// 	swing_foot_traj_y.moving_time = 0.0;
 
-		prev_sim_time = sim_time;
+	// 	prev_sim_time = sim_time;
 
-		WPG.specifying_nominal_values();
-		step_time = WPG.nominal_T;
+	// 	WPG.specifying_nominal_values();
+	// 	step_time = WPG.nominal_T;
 
-		if(prev_state == LEFT_CONTACT)
-		{
-			// LEFT SWING
-            stateMachine = RIGHT_CONTACT;
-			swing_foot_traj_x.set_duration(step_time);
-			swing_foot_traj_y.set_duration(step_time);
-			// swing_foot_traj_x.quintic_trajectory_generation();
-			// swing_foot_traj_y.quintic_trajectory_generation();
-		}
-        else
-		{
-			// RIGHT SWING
-            stateMachine = LEFT_CONTACT;
-			swing_foot_traj_x.set_duration(step_time);
-			swing_foot_traj_y.set_duration(step_time);
-			// swing_foot_traj_x.quintic_trajectory_generation();
-			// swing_foot_traj_y.quintic_trajectory_generation();
-		}
+	// 	if(prev_state == LEFT_CONTACT)
+	// 	{
+	// 		// LEFT SWING
+    //         stateMachine = RIGHT_CONTACT;
+	// 		swing_foot_traj_x.set_duration(step_time);
+	// 		swing_foot_traj_y.set_duration(step_time);
+	// 		// swing_foot_traj_x.quintic_trajectory_generation();
+	// 		// swing_foot_traj_y.quintic_trajectory_generation();
+	// 	}
+    //     else
+	// 	{
+	// 		// RIGHT SWING
+    //         stateMachine = LEFT_CONTACT;
+	// 		swing_foot_traj_x.set_duration(step_time);
+	// 		swing_foot_traj_y.set_duration(step_time);
+	// 		// swing_foot_traj_x.quintic_trajectory_generation();
+	// 		// swing_foot_traj_y.quintic_trajectory_generation();
+	// 	}
 
-	}
-	// WPG.update_qp_param();
-	// WPG.online_foot_time_placement();
-	// WPG.online_swing_foot_trajectory();
-	// WPG.com_trajectory_generation();
+	// }
+	// // WPG.update_qp_param();
+	// // WPG.online_foot_time_placement();
+	// // WPG.online_swing_foot_trajectory();
+	// // WPG.com_trajectory_generation();
 
-	swing_foot_traj_x.moving_time = sim_time - prev_sim_time;
-	swing_foot_traj_y.moving_time = sim_time - prev_sim_time;
+	// swing_foot_traj_x.moving_time = sim_time - prev_sim_time;
+	// swing_foot_traj_y.moving_time = sim_time - prev_sim_time;
 
-	swing_foot_traj_x.compute();
-	swing_foot_traj_y.compute();
+	// swing_foot_traj_x.compute();
+	// swing_foot_traj_y.compute();
 
-	p_EE_d[0](0) = swing_foot_traj_x.get_pos();
-	p_EE_d[0](1) = swing_foot_traj_y.get_pos();
-	p_EE_d[0](1) = swing_foot_traj_y.get_pos();
+	// p_EE_d[0](0) = swing_foot_traj_x.get_pos();
+	// p_EE_d[0](1) = swing_foot_traj_y.get_pos();
+	// p_EE_d[0](1) = swing_foot_traj_y.get_pos();
 	// dcm_traj = ;
 	// des_com_traj = ;
 
@@ -333,12 +335,42 @@ void CRobotControl::computeControlInput()
     /*  control cycle   */
     ///////////////////////////////////////////////////////////////////////////
 	/////// @todo : 3) Centroidal Dynamics Ground Reaction Force Deployment, CoM Dynamics, Balance Control ( QP solve )
-	// A = 
-	// b_d = 
-	// alpha = 
+	S.setIdentity();
+	alpha.setZero();
+
+	A.block(0, 0, 3, 3) = Eigen::Matrix3d::Identity();
+	A.block(0, 3, 3, 3) = Eigen::Matrix3d::Identity();
+	A.block(3, 0, 3, 3) = Skew(p_EE[0] - robot.p_B);	// left leg
+	A.block(3, 3, 3, 3) = Skew(p_EE[1] - robot.p_B);	// right leg
+	
+	Eigen::Vector3d p_c_d;
+	Eigen::Vector3d omega_c_d;
+	Eigen::Vector3d g_vec;
+	Eigen::Matrix3d I;
+
+	p_c_d << 0, 0, 0;
+	omega_c_d << 0, 0, 0;
+	g_vec << 0.0, 0.0, robot.getGravityConst();
+	b_d.segment<3>(0) = (robot.getTotalMass() * (p_c_d + g_vec));
+	b_d.segment<3>(3) = (I * omega_c_d);
+
+	// f = 
+	std::cout << robot.getGravityConst() << std::endl << std::endl;
+	std::cout << robot.getTotalMass() << std::endl << std::endl;
+	std::cout << robot.g_vec << std::endl << std::endl;
+
 	// define objective function
+	// G =	A * f.transpose() * S * f + alpha.transpose() * Eigen::MatrixXd::Identity(6, 6);
+	// g0 = -A * f.transpose() * S * b_d;
+	
 	// define inequality
+	Ci = Eigen::Matrix<double, 12, 12>::Identity();
+	ci = Eigen::Matrix<double, 12, 1>::Zero();
+	
 	// define equality
+	Ce = Eigen::Matrix<double, 12, 12>::Zero();
+	ce = Eigen::Matrix<double, 12, 1>::Zero();
+	
 	// solve qp
 	// f_qp = 
 
