@@ -8,6 +8,7 @@ Robot Walking in desired velocity (optimal DCM + task-prioritized + KinWBC + Dyn
 - [x] Nominal Gait Planning (DCM *or* Raibert Heuristic)
   - [ ] Swing Foot Trajectory Generator
   - [ ] CoM Trajectory Generator
+  - [ ] QP-based Swing Foot Trajectory Generation
 - [ ] Reaction Force Deployment
 - [ ] KinWBC
   - [ ] Task-Prioritized ( 4 tasks )
