@@ -6,6 +6,7 @@
 #include "ARBMLlib/ARBML.h"
 #include "Contact/ContactWrenchCone.h"
 #include "Trajectory/Trajectory.h"
+#include "Trajectory/Opt_Trajectory_EE.h"
 #include "WalkingPatternGeneration/WalkingPatternGeneration.h"
 
 using namespace std;
@@ -122,6 +123,7 @@ public:
 	vector<Eigen::Vector3d>		prev_p_EE_d;
 	vector<Eigen::Vector3d>		p_EE_d;
 	vector<Eigen::Vector3d>		pdot_EE_d;
+	vector<Eigen::Vector3d>		pddot_EE_d;
 
 	// CoM Dyanmics
 	Eigen::Matrix<double, 6, 6>		S;		// Weighting matrix for CoM dynamics

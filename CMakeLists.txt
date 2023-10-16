@@ -72,6 +72,14 @@ endif()
 # Custom Sources STARTS from here
 #################################
 find_package(Eigen3 REQUIRED)
+find_package(eigen-quadprog REQUIRED)
+
+include(FetchContent)
+FetchContent_Declare(csvpp
+GIT_REPOSITORY https://github.com/andreacasalino/csvcpp
+GIT_TAG        main
+)
+FetchContent_MakeAvailable(csvpp)
 
 include_directories(
     include
@@ -94,6 +102,7 @@ set(WPG_SRC
 )
 set(TRAJ_SRC 
   include/Trajectory/Trajectory.cpp
+  include/Trajectory/Opt_Trajectory_EE.cpp
 )
 
 add_executable(template 
@@ -114,6 +123,8 @@ target_link_libraries(template
   glfw
   Threads::Threads
   lodepng
+  eigen-quadprog::eigen-quadprog
+  csvpp
 )
 target_compile_options(template PUBLIC ${MUJOCO_SIMULATE_COMPILE_OPTIONS})
 #################################
