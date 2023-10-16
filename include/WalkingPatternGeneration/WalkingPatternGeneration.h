@@ -15,6 +15,7 @@ public:
     double leg_length = 0.5;        // length of leg ( prismatic length not included ) - need check again
     double foot_radius = 0.05;
     double lp = 0.2;                // length of pelvis ( check needed )
+    double control_period = 0.001;  // control period
 
     // NOMINAL GAIT TIMING PARAMETER 
     double alpha1 = 1;
@@ -35,9 +36,16 @@ public:
     double nominal_bx = 0.0;
     double nominal_by = 0.0;
     double nominal_tau = 0.0;
+    double t_step = 0.0;
+
+    Eigen::Vector3d dcm_offset;
+    Eigen::Vector3d dcm_trajectory;
+    Eigen::Vector3d com_dot_trajectory;
+    Eigen::Vector3d com_trajectory;
 
     void initialize_qp_param();
-    void specifying_nominal_values();
+    void initialize_nominal_param();
+    void specifying_nominal_values(Eigen::Vector3d des_vel, double stateMachine);
     void update_qp_param();
     void online_foot_time_placement();
     void online_swing_foot_trajectory();
