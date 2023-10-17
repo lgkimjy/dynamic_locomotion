@@ -41,6 +41,7 @@ public:
     Eigen::Vector3d dcm_offset;
     Eigen::Vector3d dcm_trajectory;
     Eigen::Vector3d com_dot_trajectory;
+    Eigen::Vector3d com_ddot_trajectory;
     Eigen::Vector3d com_trajectory;
 
     void initialize_qp_param();

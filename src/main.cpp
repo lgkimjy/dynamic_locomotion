@@ -303,7 +303,7 @@ void PhysicsLoop(mj::Simulate& sim) {
           }
 
           // requested slow-down factor
-          double slowdown = 100 / sim.percentRealTime[sim.real_time_index];
+          double slowdown = 150 / sim.percentRealTime[sim.real_time_index];
 
           // misalignment condition: distance from target sim time is bigger than syncmisalign
           bool misaligned =

@@ -3,13 +3,25 @@
 #include <chrono>
 #include <fstream>
 
+#include <csvpp/Write.h>
+
 #include "ARBMLlib/ARBML.h"
 #include "Contact/ContactWrenchCone.h"
 #include "Trajectory/Trajectory.h"
 #include "Trajectory/Opt_Trajectory_EE.h"
+#include "Trajectory/polynomial_end_effector_trajectory.hpp"
 #include "WalkingPatternGeneration/WalkingPatternGeneration.h"
 
+#include "QuadProgpp/QuadProg++.h"
+#include <qpOASES.hpp>
+USING_NAMESPACE_QPOASES
+
 using namespace std;
+
+#define RESET "\033[0m"
+#define RED "\033[31m"  /* Red */
+#define BLUE "\033[34m" /* Blue */
+
 
 //	Time Variables
 constexpr sysReal TIME_START = 3.0;				//	Second
@@ -113,27 +125,32 @@ public:
 	// Walking Pattern Generation
 	WalkingPatternGeneration	WPG;
 	double step_time;
+	double moving_time;
 	Eigen::Vector3d desired_com_pos;
 	Eigen::Vector3d desired_com_vel;
 	Eigen::Vector3d desired_com_acc;
 
 	// Trajectory Generation
-	QuinticTrajecotryProfile	swing_foot_traj_x;
-	QuinticTrajecotryProfile	swing_foot_traj_y;
 	vector<Eigen::Vector3d>		prev_p_EE_d;
+	vector<Eigen::Vector3d>		next_p_EE_d;
 	vector<Eigen::Vector3d>		p_EE_d;
 	vector<Eigen::Vector3d>		pdot_EE_d;
 	vector<Eigen::Vector3d>		pddot_EE_d;
 
 	// CoM Dyanmics
+	Cquadprogpp<12, 12, 12> 		f_qp;
 	Eigen::Matrix<double, 6, 6>		S;		// Weighting matrix for CoM dynamics
 	Eigen::Matrix<double, 6, 1>		alpha;	// Weighting matrix for CoM dynamics
 	Eigen::Matrix<double, 6, 6> 	A;
 	Eigen::Matrix<double, 6, 1> 	b_d;
-	Eigen::Matrix<double, 6, 6>		f;
+	Eigen::Matrix<double, 6, 6>		RC_mat;
+	Eigen::Matrix<double, 3, 6>		friction_cone[2];
+	Eigen::Matrix<double, 6, 12>	C_contact_cone;
+	Eigen::Matrix<double, 6, 1>		f;
+	Eigen::Matrix<double, 6, 12>	f_prime;
 	Eigen::Matrix<double, 12, 1> 	opt_rho;
-	Eigen::Matrix<double, 6, 6> 	G;
-	Eigen::Matrix<double, 6, 1> 	g0;
+	Eigen::Matrix<double, 12, 12> 	G;
+	Eigen::Matrix<double, 12, 1> 	g0;
 	Eigen::Matrix<double, 12, 12>	Ce;
 	Eigen::Matrix<double, 12, 1>	ce;
 	Eigen::Matrix<double, 12, 12>	Ci;
@@ -141,6 +158,19 @@ public:
 
 	// Contact
 	CContactWrenchCone	ContactWrench;
+
+	// Swing Trajectory
+	PolynomialEndEffectorTrajectory trajectory;
+	bool succeed = true;
+
+	// LOGGER
+    std::string destination_ee = "/Users/junyoungkim/workspaces/dynamic_locomotion/log/EEposition.csv";
+    csvpp::Writer<double, double, double, double, double, double, double, double, double, double, double, double, double, double, double, double, double, double, double, double> EE_POS{
+        // destination file
+        destination_ee,
+        // headers
+        "dt", "left_EE_X", "left_EE_Y", "left_EE_Z", "right_EE_X", "right_EE_Y", "right_EE_Z", "DCM_OFFSET_X", "DCM_OFFSET_Y", "DCM_OFFSET_Z", "DCM_X", "DCM_Y", "COM_X", "COM_Y", "LEFT_SWING_X", "LEFT_SWING_Y", "LEFT_SWING_Z", "RIGHT_SWING_X", "RIGHT_SWING_Y", "RIGHT_SWING_Z"
+    };
 
 
 	//////////	Functions	//////////

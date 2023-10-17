@@ -14,7 +14,7 @@ void WalkingPatternGeneration::initialize_nominal_param()
 
 void WalkingPatternGeneration::specifying_nominal_values(Eigen::Vector3d des_vel, double stateMachine)
 {
-    std::cout << "specifying_nominal_values" << std::endl;
+    // std::cout << "[specifying_nominal_values]" << std::endl;
 
     B_l3 = min_T;
     B_u3 = max_T;
@@ -27,6 +27,8 @@ void WalkingPatternGeneration::specifying_nominal_values(Eigen::Vector3d des_vel
         B_u2 = max_W / std::abs(des_vel(1));
     }
 
+    std::cout << B_l1 << ", " << B_l2 << ", " << B_l3 << std::endl;
+
     if( des_vel(0) != 0 && des_vel(1) != 0 ) {
         Bl = std::max(B_l1, std::max(B_l2, B_l3));
         Bu = std::min(B_u1, std::min(B_u2, B_u3));
@@ -38,6 +40,10 @@ void WalkingPatternGeneration::specifying_nominal_values(Eigen::Vector3d des_vel
     else if ( des_vel(1) != 0) {
         Bl = std::max(B_l1, B_l2);
         Bu = std::min(B_u1, B_u2);
+    }
+    else {
+        Bl = B_l3;
+        Bu = B_u3;
     }
 
     nominal_T = (Bl + Bu) / 2;
@@ -53,10 +59,10 @@ void WalkingPatternGeneration::specifying_nominal_values(Eigen::Vector3d des_vel
     t_step = (1 / omega) * log(nominal_tau);
 
     /* Nominal Variables for the walking */
-    std::cout << "-------------------------------------------------------------------------" << std::endl;
-    printf("desired x vel: %1.2f, desired y vel: %1.2f, Bl: %1.2f, Bu: %1.2f,\n", des_vel(0), des_vel(1), Bl, Bu);
-    printf("nominal_T: %1.2f, nominal_L: %1.2f, nominal_W: %1.2f, t_step: %1.2f, nominal_bx: %1.2f, nominal_by: %1.2f \n", \
-                        nominal_T, nominal_L, nominal_W, t_step, nominal_bx, nominal_by);
+    // std::cout << "-------------------------------------------------------------------------" << std::endl;
+    printf("[specifying_nominal_values] desired x vel: %1.2f, desired y vel: %1.2f, Bl: %1.2f, Bu: %1.2f,\n", des_vel(0), des_vel(1), Bl, Bu);
+    printf("[specifying_nominal_values] nominal_T: %1.2f, nominal_L: %1.2f, nominal_W: %1.2f, t_step: %1.2f, nominal_bx: %1.2f, nominal_by: %1.2f \n\n", \
+                                                                    nominal_T, nominal_L, nominal_W, t_step, nominal_bx, nominal_by);
 }
 
 void WalkingPatternGeneration::update_qp_param()
@@ -86,5 +92,6 @@ void WalkingPatternGeneration::online_foot_time_placement()
 void WalkingPatternGeneration::com_trajectory_generation()
 {
     com_dot_trajectory = -omega * (com_trajectory - dcm_trajectory);
+    com_ddot_trajectory = com_dot_trajectory / control_period;
     com_trajectory = com_dot_trajectory * control_period + com_trajectory;
 }

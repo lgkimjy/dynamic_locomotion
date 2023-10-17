@@ -98,6 +98,8 @@ void CRobotControl::initEEParameters(const mjModel* model)
 	Jdotp_EE.reserve(no_of_EE);		//	Time derivative of Jp_EE
 	Jdotr_EE.reserve(no_of_EE);		//	Time derivative of Jr_EE
 
+	prev_p_EE_d.reserve(no_of_EE);
+	next_p_EE_d.reserve(no_of_EE);
 	p_EE_d.reserve(no_of_EE);
 	pdot_EE_d.reserve(no_of_EE);
 	pddot_EE_d.reserve(no_of_EE);
@@ -113,6 +115,8 @@ void CRobotControl::initEEParameters(const mjModel* model)
 		Jdotp_EE[i].setZero();
 		Jdotr_EE[i].setZero();
 
+		prev_p_EE_d[i].setZero();
+		next_p_EE_d[i].setZero();
 		p_EE_d[i].setZero();
 		pdot_EE_d[i].setZero();
 		pddot_EE_d[i].setZero();
@@ -166,11 +170,20 @@ void CRobotControl::initCtrlParameters(const mjModel* model_mj)
 void CRobotControl::initLocomotionVariables()
 {
 	des_lin_vel.setZero();
-	des_lin_vel = {0.5, 0.0, 0.0};
+	des_lin_vel = {0.25, 0.0, 0.0};
 	des_ang_vel.setZero();
 	step_time = 0.0;
 
 	WPG.initialize_nominal_param();
+
+	p_EE_d[0] << 0.0, WPG.lp/2, 0.0;
+	prev_p_EE_d[0] << 0.0, WPG.lp/2, 0.0;
+	next_p_EE_d[0] << 0.0, WPG.lp/2, 0.0;
+	p_EE_d[1] << 0.0, -WPG.lp/2, 0.0;
+	prev_p_EE_d[1] << 0.0, -WPG.lp/2, 0.0;
+	next_p_EE_d[1] << 0.0, -WPG.lp/2, 0.0;
+	trajectory.set_mid_air_height(0.15);
+	trajectory.set_costs(1e1, 1e1, 1e1, 1e-6);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -187,7 +200,7 @@ void CRobotControl::UserControl(mjModel* model, mjData* data)
 	}
 
 	/////	Check the kinematics and dynamics of model
-	if (count_sim > 0)	compareModelComputation(model, data, count_ctrl);
+	// if (count_sim > 0)	compareModelComputation(model, data, count_ctrl);
 
 	////////////////////	Main Control Routine	////////////////////
 	if (count_sim % CONTROL_RATE == 0) {
@@ -294,56 +307,86 @@ void CRobotControl::computeControlInput()
 	/////// @todo : 2) Walking Pattern Generation
 	if(sim_time - prev_sim_time > step_time)
 	{
-        std::cout << "--------------------------------------------------------" << std::endl;
-        std::cout << "STEP CYCLE" << std::endl;
+        std::cout << BLUE << "--------------------------------------------STEP CYCLE------------------------------------------" << RESET << std::endl;
 
 		prev_sim_time = sim_time;
 
+        if(prev_state == LEFT_CONTACT)
+            stateMachine = RIGHT_CONTACT;
+        else
+            stateMachine = LEFT_CONTACT;
+		
+		prev_p_EE_d[0] = next_p_EE_d[0];
+		prev_p_EE_d[1] = next_p_EE_d[1];
 		WPG.specifying_nominal_values(des_lin_vel, stateMachine);
 		step_time = WPG.nominal_T;
 
-		if(prev_state == LEFT_CONTACT)
-		{
+		if(stateMachine == LEFT_CONTACT) {
 			// LEFT SWING
-            stateMachine = RIGHT_CONTACT;
-			// swing_foot_traj_x.set_duration(step_time);
-			// swing_foot_traj_y.set_duration(step_time);
-			// swing_foot_traj_x.quintic_trajectory_generation();
-			// swing_foot_traj_y.quintic_trajectory_generation();
+			next_p_EE_d[1](0) = prev_p_EE_d[0](0) + WPG.nominal_L;
+			next_p_EE_d[1](1) = WPG.nominal_W - WPG.lp/2;
+			WPG.dcm_offset(0) = prev_p_EE_d[0](0) + WPG.nominal_bx;
+			WPG.dcm_offset(1) = prev_p_EE_d[0](1) - WPG.nominal_by;
+			WPG.dcm_offset(2) = 0.0;
         	prev_state = LEFT_CONTACT;
 		}
-        else
-		{
+        else if(stateMachine == RIGHT_CONTACT) {
 			// RIGHT SWING
-            stateMachine = LEFT_CONTACT;
-			// swing_foot_traj_x.set_duration(step_time);
-			// swing_foot_traj_y.set_duration(step_time);
-			// swing_foot_traj_x.quintic_trajectory_generation();
-			// swing_foot_traj_y.quintic_trajectory_generation();
+			next_p_EE_d[0](0) = prev_p_EE_d[1](0) + WPG.nominal_L;
+			next_p_EE_d[0](1) = WPG.nominal_W + WPG.lp/2;
+			WPG.dcm_offset(0) = prev_p_EE_d[1](0) + WPG.nominal_bx;
+			WPG.dcm_offset(1) = prev_p_EE_d[1](1) - WPG.nominal_by;
+			WPG.dcm_offset(2) = 0.0;
         	prev_state = RIGHT_CONTACT;
 		}
-        std::cout << "--------------------------------------------------------" << std::endl;
+		succeed = true;
 	}
-	// // WPG.update_qp_param();
-	// // WPG.online_foot_time_placement();
-	// // WPG.online_swing_foot_trajectory();
-	// // WPG.com_trajectory_generation();
+    moving_time = sim_time - prev_sim_time;
 
-	// swing_foot_traj_x.moving_time = sim_time - prev_sim_time;
-	// swing_foot_traj_y.moving_time = sim_time - prev_sim_time;
+	if(stateMachine == LEFT_CONTACT) {
+		WPG.dcm_trajectory = (WPG.dcm_offset - prev_p_EE_d[0]) * std::exp(WPG.omega * moving_time) + prev_p_EE_d[0];
+		if (moving_time <= step_time - WPG.control_period)
+		{
+			succeed = succeed && trajectory.compute(prev_p_EE_d[1],
+							p_EE_d[1], pdot_EE_d[1], pddot_EE_d[1],
+							next_p_EE_d[1],
+							0.0, moving_time, step_time);
+		}
+		trajectory.get_next_state(moving_time + WPG.control_period, p_EE_d[1], pdot_EE_d[1], pddot_EE_d[1]);
+		// The current support foot does not move
+		p_EE_d[0] = prev_p_EE_d[0];
+		pdot_EE_d[0].setZero();
+		pddot_EE_d[0].setZero();
+	}
+	else {
+		WPG.dcm_trajectory = (WPG.dcm_offset - prev_p_EE_d[1]) * std::exp(WPG.omega * moving_time) + prev_p_EE_d[1];
+		if (moving_time <= step_time - WPG.control_period)
+		{
+			succeed = succeed && trajectory.compute(prev_p_EE_d[0],
+							p_EE_d[0], pdot_EE_d[0], pddot_EE_d[0],
+							next_p_EE_d[0],
+							0.0, moving_time, step_time);
+		}
+		trajectory.get_next_state(moving_time + WPG.control_period, p_EE_d[0], pdot_EE_d[0], pddot_EE_d[0]);
+		// The current support foot does not move
+		p_EE_d[1] = prev_p_EE_d[1];
+		pdot_EE_d[1].setZero();
+		pddot_EE_d[1].setZero();
+	}
+	WPG.com_trajectory_generation();
+	desired_com_pos = WPG.com_trajectory;
+	desired_com_vel = WPG.com_dot_trajectory;
+	desired_com_acc = WPG.com_ddot_trajectory;
 
-	// swing_foot_traj_x.compute();
-	// swing_foot_traj_y.compute();
+	// LOG stance, swing foot trajectory and CoM trajectory
+	EE_POS.add(sim_time, next_p_EE_d[0](0), next_p_EE_d[0](1), next_p_EE_d[0](2), 
+						next_p_EE_d[1](0), next_p_EE_d[1](1), next_p_EE_d[1](2), 
+						WPG.dcm_offset(0), WPG.dcm_offset(1), WPG.dcm_offset(2), 
+						WPG.dcm_trajectory(0), WPG.dcm_trajectory(1), 
+						WPG.com_trajectory(0), WPG.com_trajectory(1),
+						p_EE_d[0](0), p_EE_d[0](1), p_EE_d[0](2),
+						p_EE_d[1](0), p_EE_d[1](1), p_EE_d[1](2));
 
-	// p_EE_d[0](0) = swing_foot_traj_x.get_pos();
-	// p_EE_d[0](1) = swing_foot_traj_y.get_pos();
-	// p_EE_d[0](1) = swing_foot_traj_y.get_pos();
-	// dcm_traj = ;
-	// des_com_traj = ;
-
-	// desired_com_pos = WPG.com_trajectory;
-	// desired_com_vel = WPG.com_dot_trajectory;
-	// desired_com_acc = WPG.com_ddot_trajectory;
 
 	///////////////////////////////////////////////////////////////////////////
     /*  control cycle   */
@@ -360,25 +403,38 @@ void CRobotControl::computeControlInput()
 	A.block(3, 0, 3, 3) = Skew(p_EE[0] - robot.p_B);	// left leg
 	A.block(3, 3, 3, 3) = Skew(p_EE[1] - robot.p_B);	// right leg
 	
-	Eigen::Vector3d p_c_d;
-	Eigen::Vector3d omega_c_d;
+	Eigen::Vector3d pdot_c_d;
+	Eigen::Vector3d omegadot_b_d;
 	Eigen::Vector3d g_vec;
 	Eigen::Matrix3d I;
+	Eigen::Matrix3d Kp_p, Kd_p;
+	Eigen::Matrix3d Kp_omega, Kd_omega;
 
-	p_c_d << 0, 0, 0;
-	omega_c_d << 0, 0, 0;
+	Eigen::Matrix3d desiredRotationMatrix;
+	Eigen::Vector3d desired_omega_B;
+	
+	desiredRotationMatrix.setIdentity();
+	desired_omega_B.setZero();
+    Eigen::Matrix3d errorMatrix = desiredRotationMatrix * robot.R_B.transpose();
+    Eigen::AngleAxisd errorAngleAxis(errorMatrix);
+
+	pdot_c_d = Kp_p * (desired_com_pos - robot.p_CoM) + Kd_p * (desired_com_vel - robot.pdot_CoM);		// PD Controller
+	omegadot_b_d = Kp_omega * (errorAngleAxis.axis()) + Kd_omega * (desired_omega_B - robot.omega_B);	// PD Controller
 	g_vec << 0.0, 0.0, robot.getGravityConst();
-	b_d.segment<3>(0) = (robot.getTotalMass() * (p_c_d + g_vec));
-	b_d.segment<3>(3) = (I * omega_c_d);
+	b_d.segment<3>(0) = (robot.getTotalMass() * (pdot_c_d + g_vec));
+	b_d.segment<3>(3) = (I * omegadot_b_d);
 
-	// f = 
-	// std::cout << robot.getGravityConst() << std::endl << std::endl;
-	// std::cout << robot.getTotalMass() << std::endl << std::endl;
-	// std::cout << robot.g_vec << std::endl << std::endl;
-
+	RC_mat.setZero();
+	RC_mat.block(0, 0, 3, 3) = R_EE[0];
+	RC_mat.block(3, 3, 3, 3) = R_EE[1];
+	C_contact_cone.setZero();
+	C_contact_cone.block(0, 0, 3, 6) = friction_cone[0];
+	C_contact_cone.block(3, 6, 3, 6) = friction_cone[1];
+	f_prime = RC_mat * C_contact_cone;
+	
 	// define objective function
-	// G =	A * f.transpose() * S * f + alpha.transpose() * Eigen::MatrixXd::Identity(6, 6);
-	// g0 = -A * f.transpose() * S * b_d;
+	// G =	A * f_prime.transpose() * S * f_prime + alpha.transpose() * Eigen::MatrixXd::Identity(6, 6);
+	// g0 = -A * f_prime.transpose() * S * b_d;
 	
 	// define inequality
 	Ci = Eigen::Matrix<double, 12, 12>::Identity();
@@ -389,9 +445,9 @@ void CRobotControl::computeControlInput()
 	ce = Eigen::Matrix<double, 12, 1>::Zero();
 	
 	// solve qp
-	// f_qp = 
+	// f_qp.solve_QuadProg(G, g0, Ce, ce, Ci, ci, opt_rho);
+	f = f_prime * opt_rho;
 	}
-
 
 	//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 	/////// @todo : 4) KinWBC ( Task Priority-based Control )
@@ -415,9 +471,9 @@ void CRobotControl::computeControlInput()
 		J_task[0] = Jp_EE[0];
 		Jdot_task[0] = Jdotp_EE[0];
 		task_x[0] = p_EE[0];
-		task_x_d[0] = p_EE_d[0];  			// -> problem occur here
-		task_xdot_d[0] = pdot_EE_d[0];		// -> problem occur here
-		task_xddot_d[0] = pddot_EE_d[0];	// -> problem occur here
+		task_x_d[0] = p_EE_d[0];
+		task_xdot_d[0] = pdot_EE_d[0];
+		task_xddot_d[0] = pddot_EE_d[0];
 		// TASK 3: Swing Leg
 		J_task[3] = Jp_EE[1];
 		Jdot_task[3] = Jdotp_EE[1];
@@ -444,12 +500,12 @@ void CRobotControl::computeControlInput()
 	}
 
 	// TASK 1: Maintaining Posture
-	// J_task[1] = ;
-	// Jdot_task[1] = ;
-	// task_x[1] = ;
-	// task_x_d[1] = 
-	// task_xdot_d[1] = 
-	// task_xddot_d[1] = 
+	J_task[1] = Jr_lnk[0];
+	Jdot_task[1] = Jdotr_lnk[0];
+	task_x[1] = robot.R_B.eulerAngles(0, 1, 2);
+	task_x_d[1] = {0.0, 0.0, 0.0,};
+	task_xdot_d[1] = {0.0, 0.0, 0.0,};
+	task_xddot_d[1] = {0.0, 0.0, 0.0,};
 
 	// TASK 2: Maintaining CoM Position
 	J_task[2] = robot.J_CoM;
@@ -508,7 +564,7 @@ void CRobotControl::computeControlInput()
 	//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 	/////// @todo : 6) Joint Level Controller
 	//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-	// joint_torq = torq_ff + K_qp * (qpos_d - robot.q) + K_qv * (qvel_d - robot.qdot);
+	joint_torq = torq_ff + K_qp * (qpos_d - robot.q) + K_qv * (qvel_d - robot.qdot);
 	// std::cout << joint_torq.transpose() << std::endl;
 }
 
@@ -1194,7 +1250,7 @@ void CRobotControl::compareModelComputation(const mjModel* uModel, mjData* uData
 		}
 #endif
 #endif
-		cout << "+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++" << endl << endl;
+		cout << endl; cout << "+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++" << endl << endl;
 	}
 
 	/////	memory free !!!

@@ -27,6 +27,7 @@ option(MUJOCO_BUILD_SIMULATE "Build simulate library for MuJoCo" ON)
 option(MUJOCO_BUILD_TESTS "Build tests for MuJoCo" OFF)
 option(MUJOCO_TEST_PYTHON_UTIL "Build and test utility libraries for Python bindings" ON)
 add_subdirectory(${PROJECT_SOURCE_DIR}/libraries/mujoco)                             # Add subdirectory
+add_subdirectory(${PROJECT_SOURCE_DIR}/libraries/qpoases)
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/libraries/mujoco/sample/cmake") # CMake Path append
 #################################
 # Open Libraries ENDS here
@@ -73,6 +74,7 @@ endif()
 #################################
 find_package(Eigen3 REQUIRED)
 find_package(eigen-quadprog REQUIRED)
+add_subdirectory(${PROJECT_SOURCE_DIR}/libraries/QuadProgpp)
 
 include(FetchContent)
 FetchContent_Declare(csvpp
@@ -86,6 +88,7 @@ include_directories(
     INCLUDE_DIRS include
     LIBRARIES ${PROJECT_NAME}
     ${EIGEN3_INCLUDE_DIR}
+    ${PROJECT_SOURCE_DIR}/libraries/QuadProgpp/include
     DEPENDS system_lib
 )
 
@@ -103,6 +106,7 @@ set(WPG_SRC
 set(TRAJ_SRC 
   include/Trajectory/Trajectory.cpp
   include/Trajectory/Opt_Trajectory_EE.cpp
+  include/Trajectory/polynomial_end_effector_trajectory.cpp
 )
 
 add_executable(template 
@@ -121,6 +125,7 @@ target_link_libraries(template
   libsimulate
   mujoco::mujoco
   glfw
+  qpOASES
   Threads::Threads
   lodepng
   eigen-quadprog::eigen-quadprog
