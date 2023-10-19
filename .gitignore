@@ -40,4 +40,6 @@
 # Files
 .DS_Store
 libraries/mujoco
+libraries/
 model/
+log/
