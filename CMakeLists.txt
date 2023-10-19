@@ -74,7 +74,6 @@ endif()
 #################################
 find_package(Eigen3 REQUIRED)
 find_package(eigen-quadprog REQUIRED)
-add_subdirectory(${PROJECT_SOURCE_DIR}/libraries/QuadProgpp)
 
 include(FetchContent)
 FetchContent_Declare(csvpp
@@ -88,7 +87,6 @@ include_directories(
     INCLUDE_DIRS include
     LIBRARIES ${PROJECT_NAME}
     ${EIGEN3_INCLUDE_DIR}
-    ${PROJECT_SOURCE_DIR}/libraries/QuadProgpp/include
     DEPENDS system_lib
 )
 

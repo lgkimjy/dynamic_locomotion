@@ -165,6 +165,16 @@ void CRobotControl::initCtrlParameters(const mjModel* model_mj)
 
 	//cout << "Task Flag : " << TaskFlag << endl;
 	//cout << "Control Flag : " << CtrlFlag << endl;
+
+	// Centroidal Dynamics Gain
+	double K_f = 1.0;
+	double K_mu = 1.0;
+	ContactWrench.init(K_f, K_mu);
+
+	Kp_p.setIdentity();
+	Kd_p.setIdentity();
+	Kp_omega.setIdentity();
+	Kd_omega.setIdentity();
 }
 
 void CRobotControl::initLocomotionVariables()
@@ -200,7 +210,7 @@ void CRobotControl::UserControl(mjModel* model, mjData* data)
 	}
 
 	/////	Check the kinematics and dynamics of model
-	// if (count_sim > 0)	compareModelComputation(model, data, count_ctrl);
+	if (count_sim > 0)	compareModelComputation(model, data, count_ctrl);
 
 	////////////////////	Main Control Routine	////////////////////
 	if (count_sim % CONTROL_RATE == 0) {
@@ -296,6 +306,78 @@ void CRobotControl::getFeedbackInformation(const mjData* data)
 	sim_time = data->time;
 }
 
+/**
+ *	@brief compute centroidal dynamics using qp solver, w/ state of robot stance
+ * 
+ *	@param[in] stateMachine : state of robot stance
+ *	@todo
+ *		1. orientation error using exponential map representation must be re-checked.
+ *		2. centroidal rotational inertia matrix must be re-checked.
+ *		3. R_C, which is roation matrix is defined w/ identity matrix as assuming Contact frame equals to Inertial frame,
+ *		but in future, it could need to be re-defined w.r.t Contact frame.
+ */
+void CRobotControl::computeCentroidalDynamics(stateMachineTypeDef stateMachine)
+{
+	S.setIdentity();
+	alpha = 0.001;
+
+	A.setZero();
+	A.block(0, 0, 3, 3) = Eigen::Matrix3d::Identity();
+	A.block(0, 3, 3, 3) = Eigen::Matrix3d::Identity();
+	A.block(3, 0, 3, 3) = Skew(p_EE[0] - robot.p_CoM);	// left leg
+	A.block(3, 3, 3, 3) = Skew(p_EE[1] - robot.p_CoM);	// right leg
+
+	R_C.setZero();
+	R_C_left.setIdentity();
+	R_C_right.setIdentity();
+	R_C.block(0, 0, 3, 3) = R_C_left;
+	R_C.block(3, 3, 3, 3) = R_C_right;
+
+	C_contact_cone.setZero();
+	ContactWrench.computeContactWrenchCone();
+	C_contact_cone.block(0, 0, 3, 6) = ContactWrench.W;
+	C_contact_cone.block(3, 6, 3, 6) = ContactWrench.W;
+	
+	f_prime = R_C * C_contact_cone;
+
+	// Desired Centroidal Dynamics (PD control law)
+	Eigen::Matrix3d desiredRotationMatrix;
+	Eigen::Vector3d desired_omega_B;
+	desiredRotationMatrix.setIdentity();
+	desired_omega_B.setZero();
+    Eigen::Matrix3d errorMatrix = desiredRotationMatrix * robot.R_B.transpose();
+    Eigen::AngleAxisd errorAngleAxis(errorMatrix);
+
+	pddot_c_d = Kp_p * (desired_com_pos - robot.p_CoM) + Kd_p * (desired_com_vel - robot.pdot_CoM);		// desired COM acceleration using PD Controller
+	omegadot_b_d = Kp_omega * (errorAngleAxis.axis()) + Kd_omega * (desired_omega_B - robot.omega_B);	// desired angular acceleration using PD Controller
+	g_vec << 0.0, 0.0, robot.getGravityConst();
+	b_d.segment<3>(0) = (robot.getTotalMass() * (pddot_c_d + g_vec));			// total mass * (CoM acceleration + gravity)
+	b_d.segment<3>(3) = (robot.I_G_BCS[0] * omegadot_b_d);						// centroidal rotational inertia * body angular acceleration
+
+	/*  define objective function  */
+	G =	(A * f_prime).transpose() * S * (A * f_prime) + alpha * Eigen::MatrixXd::Identity(12, 12);			// w/o alpha, which is force nomralization factor, cholesky decomposition will be errroed in quadprogpp
+	g0 = -2 * (A * f_prime).transpose() * S * b_d;
+	
+	/*  Inequality constraints.  */
+	Ci.block(0, 0, 6, 6) = ContactWrench.E_cone;
+	Ci.block(6, 6, 6, 6) = ContactWrench.E_cone;
+	ci = Eigen::Matrix<double, 12, 1>::Zero();
+	
+	/*  Equality constraints.	*/
+	Ce = Eigen::Matrix<double, 12, 12>::Zero();
+	ce = Eigen::Matrix<double, 12, 1>::Zero();
+	
+	// std::cout << "G: " << std::endl << G << std::endl;
+	// std::cout << "g0: " << std::endl << g0.transpose() << std::endl;
+	// std::cout << "CE: : " << std::endl << Ce << std::endl;
+	// std::cout << "ce0: " << std::endl << ce.transpose()<< std::endl;
+	// std::cout << "CI: " << std::endl << Ci << std::endl;
+	// std::cout << "ci0: " << std::endl << ci.transpose() << std::endl;
+
+	/* solve qp */
+	// f_qp.solve_QuadProg(G, g0, Ci, ci, opt_rho);			// w/o equality constraints
+	f_qp.solve_QuadProg(G, g0, Ce, ce, Ci, ci, opt_rho);	// w/ equality constraints, error occurs: terminating with uncaught exception of type std::runtime_error: Constraints are linearly dependent, when Ce and ci is set to zero
+}
 
 
 void CRobotControl::computeControlInput()
@@ -379,83 +461,30 @@ void CRobotControl::computeControlInput()
 	desired_com_acc = WPG.com_ddot_trajectory;
 
 	// LOG stance, swing foot trajectory and CoM trajectory
-	EE_POS.add(sim_time, next_p_EE_d[0](0), next_p_EE_d[0](1), next_p_EE_d[0](2), 
-						next_p_EE_d[1](0), next_p_EE_d[1](1), next_p_EE_d[1](2), 
+	EE_POS.add(sim_time, next_p_EE_d[0](0), next_p_EE_d[0](1), next_p_EE_d[0](2), next_p_EE_d[1](0), next_p_EE_d[1](1), next_p_EE_d[1](2), 
 						WPG.dcm_offset(0), WPG.dcm_offset(1), WPG.dcm_offset(2), 
-						WPG.dcm_trajectory(0), WPG.dcm_trajectory(1), 
-						WPG.com_trajectory(0), WPG.com_trajectory(1),
-						p_EE_d[0](0), p_EE_d[0](1), p_EE_d[0](2),
-						p_EE_d[1](0), p_EE_d[1](1), p_EE_d[1](2));
+						WPG.dcm_trajectory(0), WPG.dcm_trajectory(1), WPG.com_trajectory(0), WPG.com_trajectory(1),
+						p_EE_d[0](0), p_EE_d[0](1), p_EE_d[0](2), p_EE_d[1](0), p_EE_d[1](1), p_EE_d[1](2));
 
 
 	///////////////////////////////////////////////////////////////////////////
     /*  control cycle   */
     ///////////////////////////////////////////////////////////////////////////
 	//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-	/////// @todo : 3) Centroidal Dynamics Ground Reaction Force Deployment, CoM Dynamics, Balance Control ( QP solve )
+	/////// @todo : 3) Centroidal Dynamics Ground Reaction Force Deployment ( QP solve )
 	//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-	{
-	S.setIdentity();
-	alpha.setZero();
-
-	A.block(0, 0, 3, 3) = Eigen::Matrix3d::Identity();
-	A.block(0, 3, 3, 3) = Eigen::Matrix3d::Identity();
-	A.block(3, 0, 3, 3) = Skew(p_EE[0] - robot.p_B);	// left leg
-	A.block(3, 3, 3, 3) = Skew(p_EE[1] - robot.p_B);	// right leg
-	
-	Eigen::Vector3d pdot_c_d;
-	Eigen::Vector3d omegadot_b_d;
-	Eigen::Vector3d g_vec;
-	Eigen::Matrix3d I;
-	Eigen::Matrix3d Kp_p, Kd_p;
-	Eigen::Matrix3d Kp_omega, Kd_omega;
-
-	Eigen::Matrix3d desiredRotationMatrix;
-	Eigen::Vector3d desired_omega_B;
-	
-	desiredRotationMatrix.setIdentity();
-	desired_omega_B.setZero();
-    Eigen::Matrix3d errorMatrix = desiredRotationMatrix * robot.R_B.transpose();
-    Eigen::AngleAxisd errorAngleAxis(errorMatrix);
-
-	pdot_c_d = Kp_p * (desired_com_pos - robot.p_CoM) + Kd_p * (desired_com_vel - robot.pdot_CoM);		// PD Controller
-	omegadot_b_d = Kp_omega * (errorAngleAxis.axis()) + Kd_omega * (desired_omega_B - robot.omega_B);	// PD Controller
-	g_vec << 0.0, 0.0, robot.getGravityConst();
-	b_d.segment<3>(0) = (robot.getTotalMass() * (pdot_c_d + g_vec));
-	b_d.segment<3>(3) = (I * omegadot_b_d);
-
-	RC_mat.setZero();
-	RC_mat.block(0, 0, 3, 3) = R_EE[0];
-	RC_mat.block(3, 3, 3, 3) = R_EE[1];
-	C_contact_cone.setZero();
-	C_contact_cone.block(0, 0, 3, 6) = friction_cone[0];
-	C_contact_cone.block(3, 6, 3, 6) = friction_cone[1];
-	f_prime = RC_mat * C_contact_cone;
-	
-	// define objective function
-	// G =	A * f_prime.transpose() * S * f_prime + alpha.transpose() * Eigen::MatrixXd::Identity(6, 6);
-	// g0 = -A * f_prime.transpose() * S * b_d;
-	
-	// define inequality
-	Ci = Eigen::Matrix<double, 12, 12>::Identity();
-	ci = Eigen::Matrix<double, 12, 1>::Zero();
-	
-	// define equality
-	Ce = Eigen::Matrix<double, 12, 12>::Zero();
-	ce = Eigen::Matrix<double, 12, 1>::Zero();
-	
-	// solve qp
-	// f_qp.solve_QuadProg(G, g0, Ce, ce, Ci, ci, opt_rho);
+	computeCentroidalDynamics(LEFT_CONTACT);
 	f = f_prime * opt_rho;
-	}
+	std::cout << "[computeCentroidalDynamics] left foot force: " << f.head(3).transpose() << std::endl;
+	std::cout << "[computeCentroidalDynamics] right foot force: " << f.tail(3).transpose() << std::endl;
 
 	//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 	/////// @todo : 4) KinWBC ( Task Priority-based Control )
-	//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 	//// 0: supporting leg in fixed position
 	//// 1:	maintaining posture
 	//// 2:	maintaining CoM position
 	//// 3: swing leg to follow predetermined trajectory
+	//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 	int n_tasks;
 	n_tasks = 4;
 
@@ -527,6 +556,19 @@ void CRobotControl::computeControlInput()
 	delta_q[0].setZero();
 	qdot[0].setZero();
 	qddot[0] = J_task[0].completeOrthogonalDecomposition().pseudoInverse() * (-J_task[0] * robot.xidot);
+
+    Eigen::JacobiSVD<Eigen::MatrixXd> svd(J_task[0], Eigen::ComputeFullU | Eigen::ComputeFullV);
+	Eigen::VectorXd singularValues = svd.singularValues();
+	// Eigen::MatrixXd J_pseudo_inv = svd.matrixV() * singularValues.inverse().asDiagonal() * svd.matrixU().transpose();
+	Eigen::MatrixXd J_pseudo_inv = svd.matrixV() * singularValues.asDiagonal().inverse() * svd.matrixU().transpose();
+
+	// std::cout << "----------------------------------------------------" << std::endl;
+	// std::cout << "Moore Penrose PseudoInverse:\n" << J_task[0].completeOrthogonalDecomposition().pseudoInverse() << std::endl;
+	// std::cout << "SVD PseudoInverse:\n" << J_pseudo_inv << std::endl;
+	// std::cout.precision(10);
+	// std::cout << "Comparison:\n" << J_task[0].completeOrthogonalDecomposition().pseudoInverse() - J_pseudo_inv << std::endl;
+	// std::cout << "----------------------------------------------------" << std::endl << std::endl;
+
 	J_pre[0] = J_task[1] * N[0];
 	for(int i = 1; i<n_tasks; i++) {
 		////// Priority: TASK 1 ~ N
@@ -546,13 +588,19 @@ void CRobotControl::computeControlInput()
 	qvel_d = qdot.back().segment(6, ACTIVE_DOF);
 	qacc_d = qddot.back().segment(6, ACTIVE_DOF);
 
+	// std::cout << "----------------------------------------------------" << std::endl;
+	// std::cout.precision(10);
+	// std::cout << "qpos_d: " << qpos_d.transpose() << std::endl;
+	// std::cout << "qvel_d: " << qvel_d.transpose() << std::endl;
+	// std::cout << "qacc_d: " << qacc_d.transpose() << std::endl;
+	// std::cout << "----------------------------------------------------" << std::endl << std::endl;
+
 
 
 	//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-	/////// @todo : 5) DynWBC
+	/////// @todo : 5) DynWBC, solve qp to find delta qddot and delta contact force, finding optimal solution
 	//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-	Eigen::Matrix<double, ACTIVE_DOF, 1> torq_ff;	torq_ff.setZero();
-	// Solve QP, get delta 
+	torq_ff.setZero();
 	// qddot_d +=  qddot_delta
 	// F_C = f_qp + f_delta
 	// torq_ff = M_mat_q * xi_ddot_C + C_mat_q * robot.xidot + g_vec_q;
@@ -564,7 +612,7 @@ void CRobotControl::computeControlInput()
 	//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 	/////// @todo : 6) Joint Level Controller
 	//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-	joint_torq = torq_ff + K_qp * (qpos_d - robot.q) + K_qv * (qvel_d - robot.qdot);
+	// joint_torq = torq_ff + K_qp * (qpos_d - robot.q) + K_qv * (qvel_d - robot.qdot);
 	// std::cout << joint_torq.transpose() << std::endl;
 }
 

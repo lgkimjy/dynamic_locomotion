@@ -12,8 +12,8 @@
 #include "Trajectory/polynomial_end_effector_trajectory.hpp"
 #include "WalkingPatternGeneration/WalkingPatternGeneration.h"
 
-#include "QuadProgpp/QuadProg++.h"
-#include <qpOASES.hpp>
+#include "QuadProgpp/QuadProg++.h"	// Centoridal Dynamics
+#include <qpOASES.hpp>				// Foot Step Planning
 USING_NAMESPACE_QPOASES
 
 using namespace std;
@@ -124,44 +124,49 @@ public:
 
 	// Walking Pattern Generation
 	WalkingPatternGeneration	WPG;
+	bool succeed;
 	double step_time;
 	double moving_time;
 	Eigen::Vector3d desired_com_pos;
 	Eigen::Vector3d desired_com_vel;
 	Eigen::Vector3d desired_com_acc;
 
-	// Trajectory Generation
+	// Swing Foot Trajectory Generation
+	PolynomialEndEffectorTrajectory trajectory;
 	vector<Eigen::Vector3d>		prev_p_EE_d;
 	vector<Eigen::Vector3d>		next_p_EE_d;
 	vector<Eigen::Vector3d>		p_EE_d;
 	vector<Eigen::Vector3d>		pdot_EE_d;
 	vector<Eigen::Vector3d>		pddot_EE_d;
 
-	// CoM Dyanmics
-	Cquadprogpp<12, 12, 12> 		f_qp;
-	Eigen::Matrix<double, 6, 6>		S;		// Weighting matrix for CoM dynamics
-	Eigen::Matrix<double, 6, 1>		alpha;	// Weighting matrix for CoM dynamics
+	// Centroidal Dyanmics
+	Eigen::Matrix3d Kp_p, Kd_p, Kp_omega, Kd_omega;
+	Eigen::Vector3d pddot_c_d;
+	Eigen::Vector3d omegadot_b_d;
+	Eigen::Vector3d g_vec;
+	Eigen::Matrix3d R_C_left, R_C_right;
+	Eigen::Matrix<double, 6, 6> 	R_C;
 	Eigen::Matrix<double, 6, 6> 	A;
 	Eigen::Matrix<double, 6, 1> 	b_d;
-	Eigen::Matrix<double, 6, 6>		RC_mat;
-	Eigen::Matrix<double, 3, 6>		friction_cone[2];
 	Eigen::Matrix<double, 6, 12>	C_contact_cone;
 	Eigen::Matrix<double, 6, 1>		f;
 	Eigen::Matrix<double, 6, 12>	f_prime;
+
+	Cquadprogpp<12, 12, 12> 		f_qp;
+	Eigen::Matrix<double, 6, 6>		S;		// Weighting matrix for CoM dynamics
+	double							alpha;	// force normalization factor
 	Eigen::Matrix<double, 12, 1> 	opt_rho;
-	Eigen::Matrix<double, 12, 12> 	G;
-	Eigen::Matrix<double, 12, 1> 	g0;
-	Eigen::Matrix<double, 12, 12>	Ce;
-	Eigen::Matrix<double, 12, 1>	ce;
-	Eigen::Matrix<double, 12, 12>	Ci;
-	Eigen::Matrix<double, 12, 1>	ci;
+	Eigen::Matrix<double, 12, 12>	G, Ce, Ci;
+	Eigen::Matrix<double, 12, 1>	g0, ce, ci;
 
 	// Contact
 	CContactWrenchCone	ContactWrench;
 
-	// Swing Trajectory
-	PolynomialEndEffectorTrajectory trajectory;
-	bool succeed = true;
+	// Dynamics Level WBC using Quadratic Programming to find delta values
+	Eigen::Matrix<double, ACTIVE_DOF, 1>	torq_ff;
+	// Eigen::Vector<double, 6, 1> 			delta_f;
+	// Eigen::Vector<double, ACTIVE_DOF, 1>	delta_qddot;
+
 
 	// LOGGER
     std::string destination_ee = "/Users/junyoungkim/workspaces/dynamic_locomotion/log/EEposition.csv";
@@ -171,7 +176,6 @@ public:
         // headers
         "dt", "left_EE_X", "left_EE_Y", "left_EE_Z", "right_EE_X", "right_EE_Y", "right_EE_Z", "DCM_OFFSET_X", "DCM_OFFSET_Y", "DCM_OFFSET_Z", "DCM_X", "DCM_Y", "COM_X", "COM_Y", "LEFT_SWING_X", "LEFT_SWING_Y", "LEFT_SWING_Z", "RIGHT_SWING_X", "RIGHT_SWING_Y", "RIGHT_SWING_Z"
     };
-
 
 	//////////	Functions	//////////
 	void InitializeSystem(const mjModel* model_mj);
@@ -187,6 +191,9 @@ public:
 	void computeCoMMotion();
 	void computeEEKinematics(Eigen::Matrix<double, TOTAL_DOF, 1>& xidot);
 	void computeLinkKinematics();	//	Compute kinematics and Jacobian, Jdot, etc
+
+	void computeCentroidalDynamics(stateMachineTypeDef stateMachine);
+	void computeTaskPriorityKinematics();
 
 	//	Check code validaty
 	void compareModelComputation(const mjModel* model, mjData* data, const int& count);
