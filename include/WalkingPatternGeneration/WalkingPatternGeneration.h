@@ -1,6 +1,7 @@
 #include <iostream>
-
 #include <Eigen/Dense>
+#include <qpOASES.hpp>				// Foot Step Planning
+USING_NAMESPACE_QPOASES
 
 class WalkingPatternGeneration
 {
@@ -16,6 +17,35 @@ public:
     double foot_radius = 0.05;
     double lp = 0.2;                // length of pelvis ( check needed )
     double control_period = 0.001;  // control period
+
+    /* 
+     *  Optimization Variables for Gait Timing
+     *  number of variable: 5, number of constraints: 8 ( eq:2, ineq:6 )
+     */
+    real_t H[5 * 5];
+    real_t k[5];
+    real_t A[5 * 8];
+    real_t lbA[8];
+    real_t ubA[8];
+	/* Setting up QProblem object. */
+    QProblem example;
+	Options options;
+	real_t xOpt[5];
+
+    real_t *lb = NULL; real_t *ub = NULL;
+
+    double xi[3];
+
+    double u_x = 0.0;
+    double u_y = 0.0;
+    double u_x_0 = 0.0;
+    double u_y_0 = 0.0;
+    double tau = 0.0;
+    double b_x = 0.0;
+    double b_y = 0.0;
+
+    double t_moving;
+
 
     // NOMINAL GAIT TIMING PARAMETER 
     double alpha1 = 1;
