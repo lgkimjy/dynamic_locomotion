@@ -13,14 +13,14 @@
 #include "WalkingPatternGeneration/WalkingPatternGeneration.h"
 
 #include "QuadProgpp/QuadProg++.h"	// Centoridal Dynamics
-#include <qpOASES.hpp>				// Foot Step Planning
-USING_NAMESPACE_QPOASES
 
 using namespace std;
 
 #define RESET "\033[0m"
 #define RED "\033[31m"  /* Red */
 #define BLUE "\033[34m" /* Blue */
+const Eigen::IOFormat fmt(Eigen::StreamPrecision, Eigen::DontAlignCols, ", ", "\n", "[ ", " ]");
+const Eigen::IOFormat full_fmt(Eigen::FullPrecision, Eigen::DontAlignCols, ", ", "\n", "[ ", " ]");
 
 
 //	Time Variables
@@ -162,10 +162,29 @@ public:
 	// Contact
 	CContactWrenchCone	ContactWrench;
 
+
+	// Task-Priority-based Kinematics Control
+	int n_tasks;
+	vector<Eigen::Vector3d> task_x;
+	vector<Eigen::Vector3d> task_x_d;
+	vector<Eigen::Vector3d> task_xdot_d;
+	vector<Eigen::Vector3d> task_xddot_d;
+	vector<Eigen::Matrix<double, DOF3, TOTAL_DOF>> J_task;
+	vector<Eigen::Matrix<double, DOF3, TOTAL_DOF>> Jdot_task;
+
+	vector<Eigen::Matrix<double, TOTAL_DOF, 1>> delta_q;
+	vector<Eigen::Matrix<double, TOTAL_DOF, 1>> qdot;
+	vector<Eigen::Matrix<double, TOTAL_DOF, 1>> qddot;
+	vector<Eigen::Matrix<double, DOF3, TOTAL_DOF>> J_pre;
+	vector<Eigen::Matrix<double, TOTAL_DOF, TOTAL_DOF>> N;
+	vector<Eigen::Matrix<double, TOTAL_DOF, TOTAL_DOF>> N_pre;
+
+
 	// Dynamics Level WBC using Quadratic Programming to find delta values
 	Eigen::Matrix<double, ACTIVE_DOF, 1>	torq_ff;
-	// Eigen::Vector<double, 6, 1> 			delta_f;
-	// Eigen::Vector<double, ACTIVE_DOF, 1>	delta_qddot;
+	Eigen::Matrix<double, 6, 1> 			delta_f;
+	Eigen::Matrix<double, 12, 1> 			delta_rho;
+	Eigen::Matrix<double, ACTIVE_DOF, 1>	delta_qddot;
 
 
 	// LOGGER
@@ -194,6 +213,7 @@ public:
 
 	void computeCentroidalDynamics(stateMachineTypeDef stateMachine);
 	void computeTaskPriorityKinematics();
+	void computeDynamicLevelWBC();
 
 	//	Check code validaty
 	void compareModelComputation(const mjModel* model, mjData* data, const int& count);
