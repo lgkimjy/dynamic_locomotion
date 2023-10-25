@@ -16,12 +16,12 @@
 
 using namespace std;
 
+#define FUNC_TAG "[" << __func__ << "] "
 #define RESET "\033[0m"
 #define RED "\033[31m"  /* Red */
 #define BLUE "\033[34m" /* Blue */
-const Eigen::IOFormat fmt(Eigen::StreamPrecision, Eigen::DontAlignCols, ", ", "\n", "[ ", " ]");
-const Eigen::IOFormat full_fmt(Eigen::FullPrecision, Eigen::DontAlignCols, ", ", "\n", "[ ", " ]");
-
+const Eigen::IOFormat fmt(Eigen::StreamPrecision, 0, ", ", "\n", "[ ", " ]");
+const Eigen::IOFormat full_fmt(Eigen::FullPrecision, 0, ", ", "\n", "[ ", " ]");
 
 //	Time Variables
 constexpr sysReal TIME_START = 3.0;				//	Second
@@ -188,10 +188,17 @@ public:
 
 
 	// LOGGER
-    std::string destination_ee = "/Users/junyoungkim/workspaces/dynamic_locomotion/log/EEposition.csv";
+    std::string path_swing = "/Users/junyoungkim/workspaces/dynamic_locomotion/log/EEposition.csv";
+	csvpp::Writer<double, double, double, double, double, double, double, double, double, double, double, double, double, double, double, double, double, double, double> SWING{
+        // destination file
+        path_swing,
+        // headers
+        "dt", "left_x", "left_y", "left_z", "right_x", "right_y", "right_z", "left_xdot", "left_ydot", "left_zdot", "right_xdot", "right_ydot", "right_zdot", "left_xddot", "left_yddot", "left_zddot", "right_xddot", "right_yddot", "right_zddot"
+    };
+	std::string path_task = "/Users/junyoungkim/workspaces/dynamic_locomotion/log/ssss.csv";
     csvpp::Writer<double, double, double, double, double, double, double, double, double, double, double, double, double, double, double, double, double, double, double, double> EE_POS{
         // destination file
-        destination_ee,
+        path_task,
         // headers
         "dt", "left_EE_X", "left_EE_Y", "left_EE_Z", "right_EE_X", "right_EE_Y", "right_EE_Z", "DCM_OFFSET_X", "DCM_OFFSET_Y", "DCM_OFFSET_Z", "DCM_X", "DCM_Y", "COM_X", "COM_Y", "LEFT_SWING_X", "LEFT_SWING_Y", "LEFT_SWING_Z", "RIGHT_SWING_X", "RIGHT_SWING_Y", "RIGHT_SWING_Z"
     };
@@ -211,9 +218,56 @@ public:
 	void computeEEKinematics(Eigen::Matrix<double, TOTAL_DOF, 1>& xidot);
 	void computeLinkKinematics();	//	Compute kinematics and Jacobian, Jdot, etc
 
+	/////////// Extra Functions ///////////
 	void computeCentroidalDynamics(stateMachineTypeDef stateMachine);
+	void assignTaskPriority(stateMachineTypeDef stateMachine);
 	void computeTaskPriorityKinematics();
 	void computeDynamicLevelWBC();
+
+	void svd_pseudoInverse(Eigen::MatrixXd Matrix, Eigen::MatrixXd& invMatrix)
+	{
+		Eigen::JacobiSVD<Eigen::MatrixXd> svd(Matrix, Eigen::ComputeThinU | Eigen::ComputeThinV);
+		Eigen::VectorXd S = svd.singularValues();
+
+		Eigen::VectorXd Sinv = S;
+		for (int i = 0; i < S.size(); i++)
+		{
+			if (S(i) > 0.0001)
+				Sinv(i) = 1.0 / S(i);
+			else
+				Sinv(i) = 0.0;
+		}
+
+		invMatrix = svd.matrixV() * Sinv.asDiagonal() * svd.matrixU().transpose();		
+	}
+
+	bool checkMatrixRank_svdMethod(Eigen::MatrixXd Matrix)
+	{
+		Eigen::JacobiSVD<Eigen::MatrixXd> svd(Matrix, Eigen::ComputeThinU | Eigen::ComputeThinV);
+		Eigen::VectorXd S = svd.singularValues();
+
+		for (int i = 0; i < S.size(); i++)
+		{
+			if (S(i) < 0.0001)
+				return false;
+		}
+		return true;
+	}
+
+	bool checkMatrixRank_LUMethod(Eigen::MatrixXd Matrix)
+	{
+		int rank = Matrix.fullPivLu().rank();
+		int dim = std::min(Matrix.rows(), Matrix.cols());
+
+		if (rank == dim) {
+			std::cout << "Full rank matrix: " << rank << std::endl;
+			return true;
+		}
+		std::cout << "Deficient rank matrix: " << rank << std::endl;
+
+		return false;
+	}
+
 
 	//	Check code validaty
 	void compareModelComputation(const mjModel* model, mjData* data, const int& count);

@@ -157,14 +157,8 @@ void CRobotControl::initCtrlParameters(const mjModel* model_mj)
 	K_qp = 1000.0 * K_qp.setIdentity();
 	K_qv = 100.0 * K_qv.setIdentity();
 
-	//	Task selection
-	// TaskFlag = TaskScheduleFlag = task_standing;
-
-	//CtrlFlag = (unsigned)PointJointPD;
-	// CtrlFlag = (unsigned)TrackingJointPD;
-
-	//cout << "Task Flag : " << TaskFlag << endl;
-	//cout << "Control Flag : " << CtrlFlag << endl;
+	Kp_p = 100.0 * Kp_p.setIdentity();
+	Kd_p = 20.0 * Kd_p.setIdentity();
 
 	// Centroidal Dynamics Gain
 	double K_f = 1.0;
@@ -181,9 +175,11 @@ void CRobotControl::initLocomotionVariables()
 {
 	des_lin_vel.setZero();
 	des_lin_vel = {0.25, 0.0, 0.0};
+	// des_lin_vel = {0.0, 0.0, 0.0};
 	des_ang_vel.setZero();
 	step_time = 0.0;
 
+	stateMachine = RIGHT_CONTACT;
 	WPG.initialize_nominal_param();
 
 	p_EE_d[0] << 0.0, WPG.lp/2, 0.0;
@@ -318,7 +314,8 @@ void CRobotControl::getFeedbackInformation(const mjData* data)
  */
 void CRobotControl::computeCentroidalDynamics(stateMachineTypeDef stateMachine)
 {
-	S.setIdentity();
+	std::cout << "--------------------------------------------" << FUNC_TAG << "--------------------------------------------" << std::endl;
+	S = 10 * S.setIdentity();
 	alpha = 0.001;
 
 	A.setZero();
@@ -340,6 +337,10 @@ void CRobotControl::computeCentroidalDynamics(stateMachineTypeDef stateMachine)
 	
 	f_prime = R_C * C_contact_cone;
 
+	// std::cout << FUNC_TAG << "A matrix rank: " << A.fullPivLu().rank() << std::endl;
+	// std::cout << FUNC_TAG << "Desired_com_pos: " << desired_com_pos.transpose().format(fmt) << std::endl;
+	// std::cout << FUNC_TAG << "robot.p_CoM : " << robot.p_CoM.transpose().format(fmt) << std::endl;
+
 	// Desired Centroidal Dynamics (PD control law)
 	Eigen::Matrix3d desiredRotationMatrix;
 	Eigen::Vector3d desired_omega_B;
@@ -347,16 +348,19 @@ void CRobotControl::computeCentroidalDynamics(stateMachineTypeDef stateMachine)
 	desired_omega_B.setZero();
     Eigen::Matrix3d errorMatrix = desiredRotationMatrix * robot.R_B.transpose();
     Eigen::AngleAxisd errorAngleAxis(errorMatrix);
-
+ 
 	pddot_c_d = Kp_p * (desired_com_pos - robot.p_CoM) + Kd_p * (desired_com_vel - robot.pdot_CoM);		// desired COM acceleration using PD Controller
 	omegadot_b_d = Kp_omega * (errorAngleAxis.axis()) + Kd_omega * (desired_omega_B - robot.omega_B);	// desired angular acceleration using PD Controller
 	g_vec << 0.0, 0.0, robot.getGravityConst();
-	b_d.segment<3>(0) = (robot.getTotalMass() * (pddot_c_d + g_vec));			// total mass * (CoM acceleration + gravity)
+
+	b_d.segment<3>(0) = (robot.getTotalMass() * (g_vec));						// total mass * (CoM acceleration + gravity)
+	// b_d.segment<3>(0) = (robot.getTotalMass() * (pddot_c_d + g_vec));		// total mass * (gravity) -> just for checking reaction ground force w/o desired COM acceleration
 	b_d.segment<3>(3) = (robot.I_G_BCS[0] * omegadot_b_d);						// centroidal rotational inertia * body angular acceleration
 
 	/*  define objective function  */
-	G =	(A * f_prime).transpose() * S * (A * f_prime) + alpha * Eigen::MatrixXd::Identity(12, 12);			// w/o alpha, which is force nomralization factor, cholesky decomposition will be errroed in quadprogpp
-	g0 = -2 * (A * f_prime).transpose() * S * b_d;
+	G =	(A * f_prime).transpose() * S * (A * f_prime);
+	G += alpha * Eigen::MatrixXd::Identity(12, 12);								// w/o alpha, which is force nomralization factor, cholesky decomposition will be errroed in quadprogpp
+	g0 = -1 * (A * f_prime).transpose() * S * b_d;
 	
 	/*  Inequality constraints.  */
 	Ci.block(0, 0, 6, 6) = ContactWrench.E_cone;
@@ -367,16 +371,52 @@ void CRobotControl::computeCentroidalDynamics(stateMachineTypeDef stateMachine)
 	Ce = Eigen::Matrix<double, 12, 12>::Zero();
 	ce = Eigen::Matrix<double, 12, 1>::Zero();
 	
-	// std::cout << "G: " << std::endl << G << std::endl;
-	// std::cout << "g0: " << std::endl << g0.transpose() << std::endl;
-	// std::cout << "CE: : " << std::endl << Ce << std::endl;
-	// std::cout << "ce0: " << std::endl << ce.transpose()<< std::endl;
-	// std::cout << "CI: " << std::endl << Ci << std::endl;
-	// std::cout << "ci0: " << std::endl << ci.transpose() << std::endl;
+	// std::cout << FUNC_TAG << std::endl;
+	// std::cout << "G: " << std::endl << G.format(fmt) << std::endl;
+	// std::cout << "g0: " << g0.transpose().format(fmt) << std::endl;
+	// std::cout << "CE: : " << std::endl << Ce.format(fmt) << std::endl;
+	// std::cout << "ce: " << ce.transpose().format(fmt) << std::endl;
+	// std::cout << "CI: " << std::endl << Ci.format(fmt) << std::endl;
+	// std::cout << "ci: " << ci.transpose().format(fmt) << std::endl;
 
 	/* solve qp */
 	f_qp.solve_QuadProg(G, g0, Ci, ci, opt_rho);			// w/o equality constraints
 	// f_qp.solve_QuadProg(G, g0, Ce, ce, Ci, ci, opt_rho);	// w/ equality constraints, error occurs: terminating with uncaught exception of type std::runtime_error: Constraints are linearly dependent, when Ce and ci is set to zero
+	f = f_prime * opt_rho;
+
+	// std::cout << FUNC_TAG << "p_EE[0] - robot.p_CoM: " << (p_EE[0] - robot.p_CoM).transpose().format(fmt) << std::endl;
+	// std::cout << FUNC_TAG << "p_EE[1] - robot.p_CoM: " << (p_EE[1] - robot.p_CoM).transpose().format(fmt) << std::endl;
+	// std::cout << FUNC_TAG << "skew(p_EE[0] - robot.p_CoM): " << std::endl << Skew(p_EE[0] - robot.p_CoM).format(fmt) << std::endl;
+	// std::cout << FUNC_TAG << "skew(p_EE[1] - robot.p_CoM): " << std::endl << Skew(p_EE[1] - robot.p_CoM).format(fmt) << std::endl;
+	// std::cout << FUNC_TAG << "RC: " << std::endl << R_C.format(fmt) << std::endl;
+	// std::cout << FUNC_TAG << "U: " << std::endl << C_contact_cone.format(fmt) << std::endl;
+	// std::cout << FUNC_TAG << "opt_rho: " << opt_rho.transpose().format(fmt) << std::endl;
+	// std::cout << FUNC_TAG << "l_foot reaction force: " << f.head(3).transpose().format(full_fmt) << std::endl;
+	// std::cout << FUNC_TAG << "r_foot reaction force: " << f.tail(3).transpose().format(full_fmt) << std::endl;
+}
+
+
+/**
+ * @brief 
+ * 
+ * @param stateMachine 
+ */
+void CRobotControl::assignTaskPriority(stateMachineTypeDef stateMachine)
+{
+	//// 0: supporting leg in fixed position
+	//// 1:	maintaining posture5
+	//// 2:	maintaining CoM position
+	//// 3: swing leg to follow predetermined trajectory
+	std::cout << "--------------------------------------------" << FUNC_TAG << "--------------------------------------------" << std::endl;
+}
+
+
+void CRobotControl::computeTaskPriorityKinematics()
+{
+	std::cout << "--------------------------------------------" << FUNC_TAG << "--------------------------------------------" << std::endl;
+
+	Eigen::Vector3d delta_q;
+	std::cout << delta_q.transpose() << std::endl;
 }
 
 
@@ -389,7 +429,7 @@ void CRobotControl::computeControlInput()
 	/////// @todo : 2) Walking Pattern Generation
 	if(sim_time - prev_sim_time > step_time)
 	{
-        std::cout << BLUE << "--------------------------------------------STEP CYCLE------------------------------------------" << RESET << std::endl;
+        std::cout << BLUE << "--------------------------------------------STEP CYCLE--------------------------------------------" << RESET << std::endl;
 
 		prev_sim_time = sim_time;
 
@@ -461,35 +501,25 @@ void CRobotControl::computeControlInput()
 	desired_com_acc = WPG.com_ddot_trajectory;
 
 	// LOG stance, swing foot trajectory and CoM trajectory
-	EE_POS.add(sim_time, next_p_EE_d[0](0), next_p_EE_d[0](1), next_p_EE_d[0](2), next_p_EE_d[1](0), next_p_EE_d[1](1), next_p_EE_d[1](2), 
-						WPG.dcm_offset(0), WPG.dcm_offset(1), WPG.dcm_offset(2), 
-						WPG.dcm_trajectory(0), WPG.dcm_trajectory(1), WPG.com_trajectory(0), WPG.com_trajectory(1),
-						p_EE_d[0](0), p_EE_d[0](1), p_EE_d[0](2), p_EE_d[1](0), p_EE_d[1](1), p_EE_d[1](2));
+	SWING.add(sim_time, p_EE_d[0](0), p_EE_d[0](1), p_EE_d[0](2), p_EE_d[1](0), p_EE_d[1](1), p_EE_d[1](2),
+						pdot_EE_d[0](0), pdot_EE_d[0](1), pdot_EE_d[0](2), pdot_EE_d[1](0), pdot_EE_d[1](1), pdot_EE_d[1](2),
+						pddot_EE_d[0](0), pddot_EE_d[0](1), pddot_EE_d[0](2), pddot_EE_d[1](0), pddot_EE_d[1](1), pddot_EE_d[1](2));
 
 
 	///////////////////////////////////////////////////////////////////////////
     /*  control cycle   */
     ///////////////////////////////////////////////////////////////////////////
 	//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-	/////// @todo : 3) Centroidal Dynamics Ground Reaction Force Deployment ( QP solve )
+	/////// 3) Centroidal Dynamics Ground Reaction Force Deployment ( QP solve )
 	//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 	computeCentroidalDynamics(LEFT_CONTACT);
-	f = f_prime * opt_rho;
-	// Skew(p_EE[0] - robot.p_CoM);	// left leg
-	// Skew(p_EE[1] - robot.p_CoM);	// right leg
-	// std::cout << p_EE[0].transpose().format(fmt) << std::endl;
-	// std::cout << p_EE[1].transpose().format(fmt) << std::endl;
-	std::cout << "---------------------------------------------------------------------" << std::endl;
-	std::cout << "[computeCentroidalDynamics] l_foot force: " << f.head(3).transpose().format(fmt) << std::endl;
-	std::cout << "[computeCentroidalDynamics] r_foot force: " << f.tail(3).transpose().format(fmt) << std::endl;
+
 
 	//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 	/////// @todo : 4) KinWBC ( Task Priority-based Control )
-	//// 0: supporting leg in fixed position
-	//// 1:	maintaining posture5
-	//// 2:	maintaining CoM position
-	//// 3: swing leg to follow predetermined trajectory
 	//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+	assignTaskPriority(LEFT_CONTACT);
+	computeTaskPriorityKinematics();
 	n_tasks = 4;
 
 	task_x.reserve(n_tasks);
@@ -509,12 +539,12 @@ void CRobotControl::computeControlInput()
 		task_xdot_d[0] = pdot_EE_d[0];
 		task_xddot_d[0] = pddot_EE_d[0];
 		// TASK 3: Swing Leg
-		J_task[3] = Jp_EE[1];
-		Jdot_task[3] = Jdotp_EE[1];
-		task_x[3] = p_EE[1];
-		task_x_d[3] = p_EE_d[1];
-		task_xdot_d[3] = pdot_EE_d[1];
-		task_xddot_d[3] = pddot_EE_d[1]; 
+		J_task[1] = Jp_EE[1];
+		Jdot_task[1] = Jdotp_EE[1];
+		task_x[1] = p_EE[1];
+		task_x_d[1] = p_EE_d[1];
+		task_xdot_d[1] = pdot_EE_d[1];
+		task_xddot_d[1] = pddot_EE_d[1]; 
 	}
 	else if(stateMachine == RIGHT_CONTACT) {
 		// TASK 0: Supporting Leg
@@ -525,21 +555,21 @@ void CRobotControl::computeControlInput()
 		task_xdot_d[0] = pdot_EE_d[1];
 		task_xddot_d[0] = pddot_EE_d[1]; 
 		// TASK 3: Swing Leg
-		J_task[3] = Jp_EE[0];
-		Jdot_task[3] = Jdotp_EE[0];
-		task_x[3] = p_EE[0];
-		task_x_d[3] = p_EE_d[0];
-		task_xdot_d[3] = pdot_EE_d[0];
-		task_xddot_d[3] = pddot_EE_d[0];
+		J_task[1] = Jp_EE[0];
+		Jdot_task[1] = Jdotp_EE[0];
+		task_x[1] = p_EE[0];
+		task_x_d[1] = p_EE_d[0];
+		task_xdot_d[1] = pdot_EE_d[0];
+		task_xddot_d[1] = pddot_EE_d[0];
 	}
 
 	// TASK 1: Maintaining Posture  --> Check needed
-	J_task[1] = Jr_lnk[0];
-	Jdot_task[1] = Jdotr_lnk[0];
-	task_x[1] = robot.R_B.eulerAngles(0, 1, 2);
-	task_x_d[1] = {0.0, 0.0, 0.0,};
-	task_xdot_d[1] = {0.0, 0.0, 0.0,};
-	task_xddot_d[1] = {0.0, 0.0, 0.0,};
+	J_task[3] = Jr_lnk[0];
+	Jdot_task[3] = Jdotr_lnk[0];
+	task_x[3] = robot.R_B.eulerAngles(0, 1, 2);
+	task_x_d[3] = {0.0, 0.0, 0.0,};
+	task_xdot_d[3] = {0.0, 0.0, 0.0,};
+	task_xddot_d[3] = {0.0, 0.0, 0.0,};
 
 	// TASK 2: Maintaining CoM Position
 	J_task[2] = robot.J_CoM;
@@ -557,48 +587,69 @@ void CRobotControl::computeControlInput()
 	N.reserve(n_tasks);
 	N_pre.reserve(n_tasks);
 
-	////// Priority: TASK 0;
-	N[0].setIdentity();
-	delta_q[0].setZero();
-	qdot[0].setZero();
-	qddot[0] = J_task[0].completeOrthogonalDecomposition().pseudoInverse() * (-J_task[0] * robot.xidot);
-
-    // Eigen::JacobiSVD<Eigen::MatrixXd> svd(J_task[0], Eigen::ComputeFullU | Eigen::ComputeFullV);
-	// Eigen::VectorXd singularValues = svd.singularValues();
-	// // Eigen::MatrixXd J_pseudo_inv = svd.matrixV() * singularValues.inverse().asDiagonal() * svd.matrixU().transpose();
-	// Eigen::MatrixXd J_pseudo_inv = svd.matrixV() * singularValues.asDiagonal().inverse() * svd.matrixU().transpose();
+	for(int i=0; i<n_tasks; i++) {
+		delta_q[i].setZero();
+		qdot[i].setZero();
+		qddot[i].setZero();
+		J_pre[i].setZero();
+		N[i].setZero();
+		N_pre[i].setZero();
+	}
 
 	// std::cout << "----------------------------------------------------" << std::endl;
-	// std::cout << "Moore Penrose PseudoInverse:\n" << J_task[0].completeOrthogonalDecomposition().pseudoInverse() << std::endl;
-	// std::cout << "SVD PseudoInverse:\n" << J_pseudo_inv << std::endl;
-	// std::cout.precision(10);
-	// std::cout << "Comparison:\n" << J_task[0].completeOrthogonalDecomposition().pseudoInverse() - J_pseudo_inv << std::endl;
+	// Eigen::MatrixXd mp_J_psudo_inv;
+	// Eigen::MatrixXd svd_J_psudo_inv;
+	// mp_J_psudo_inv = J_task[0].completeOrthogonalDecomposition().pseudoInverse();
+	// svd_pseudoInverse(J_task[0], svd_J_psudo_inv);
+	// std::cout << "Moore Penrose PseudoInverse: \n" <<mp_J_psudo_inv << std::endl;
+	// std::cout << "SVD PseudoInverse: \n" << svd_J_psudo_inv << std::endl;
+	// std::cout << "Compare: \n" << (mp_J_psudo_inv - svd_J_psudo_inv).format(full_fmt) << std::endl;
 	// std::cout << "----------------------------------------------------" << std::endl << std::endl;
 
 	// Task 및 Desired Task를 한번씩 전부 출력해 볼 것.
 	// 첫자세에서는 어느정도 비슷한 값을 갖고 있어야 하는데, 그렇지 않다면 문제가 있는 것.
 	// 첫 initialize에 문제가 있거나, com 높이에 문제가 있을 수도 있고, 어떤 frame에서 바라본 값들인지에 대한 확인도 필요 할 것
-	// 그게 전부 정확하다면 무조건 아래 recursive loop에서 문제가 있는 것.
-	// 그러니 한번 값들 task값들 한번 출력해 볼 것.
+	// 그게 전부 정확하다면 무조건 아래 recursive loop에서 문제가 있는 것, 그러니 한번 값들 task값들 한번 출력해 볼 것.
 
-	J_pre[0] = J_task[1] * N[0];
-	for(int i = 1; i<n_tasks; i++) {
+	delta_q[0].setZero();
+	qdot[0].setZero();
+	qddot[0] = J_task[0].completeOrthogonalDecomposition().pseudoInverse() * (-J_task[0] * robot.xidot);
+	N[0] = Eigen::MatrixXd::Identity(TOTAL_DOF, TOTAL_DOF) - J_task[0].completeOrthogonalDecomposition().pseudoInverse() * J_task[0];
+
+	std::cout << "stateMachine: " << ((stateMachine == LEFT_CONTACT)? "LEFT CONTACT: ":"RIGHT CONTACT: ") << std::endl;
+	std::cout << "--------------------------------------TASK 0--------------------------------------" << std::endl;
+	std::cout << "Jc" << std::endl << J_task[0].format(fmt) << std::endl;
+	std::cout << "Jc_pinv" << std::endl << J_task[0].completeOrthogonalDecomposition().pseudoInverse().format(fmt) << std::endl;
+	std::cout << "N0 = I - Jc_pinv * Jc" << std::endl << N[0].format(fmt) << std::endl;
+
+	for(int i = 1; i<n_tasks; i++) 
+	{
 		////// Priority: TASK 1 ~ N
-		N_pre[i] =  Eigen::MatrixXd::Identity(TOTAL_DOF, TOTAL_DOF) - J_pre[i-1].completeOrthogonalDecomposition().pseudoInverse() * J_pre[i-1];
-		N[i-1] *= N_pre[i];
+		std::cout << "--------------------------------------TASK " << i << "--------------------------------------" << std::endl;
 		J_pre[i] = J_task[i] * N[i-1];
+		Eigen::MatrixXd J_pre_pinv;
+		svd_pseudoInverse(J_pre[i], J_pre_pinv);
 
-		Eigen::MatrixXd pseudoInv_J_pre;
-		pseudoInv_J_pre = J_pre[i].completeOrthogonalDecomposition().pseudoInverse();
+		delta_q[i] = delta_q[i-1] + J_pre_pinv * (task_x_d[i] - task_x[i] - J_task[i] * delta_q[i-1]);
+		qdot[i] = qdot[i-1] + J_pre_pinv * (task_xdot_d[i] - J_task[i] * qdot[i-1]);
+		qddot[i] = qddot[i-1] + J_pre_pinv * (task_xddot_d[i] - Jdot_task[i] * robot.xidot - J_task[i] * qddot[i-1]);
 
-		delta_q[i] = delta_q[i-1] + pseudoInv_J_pre * (task_x_d[i] - task_x[i] - J_task[i] * delta_q[i-1]);
-		qdot[i] = qdot[i-1] + pseudoInv_J_pre * (task_xdot_d[i] - J_task[i] * qdot[i-1]);
-		qddot[i] = qddot[i-1] + pseudoInv_J_pre * (task_xddot_d[i] - Jdot_task[i] * robot.xidot - J_task[i] * qddot[i-1]);
+		std::cout << "J" << i << std::endl << J_task[i].format(fmt) << std::endl;
+		std::cout << "N" << i-1 << std::endl << N[i-1].format(fmt) << std::endl;
+		std::cout << "J_pre = J" << i << "N" << i-1 << std::endl << J_pre[i].format(fmt) << std::endl;
+		std::cout << "J_pre_pinv" << std::endl << J_pre_pinv.format(fmt) << std::endl;
+		std::cout << "delta_q" << i << std::endl << delta_q[i].transpose().format(fmt) << std::endl;
+
+		N_pre[i] = Eigen::MatrixXd::Identity(TOTAL_DOF, TOTAL_DOF) - J_pre_pinv * J_pre[i];
+		N[i] = N[i-1] * N_pre[i];
 	}
-	
-	qpos_d = robot.q + delta_q.back().segment(6, ACTIVE_DOF);
-	qvel_d = qdot.back().segment(6, ACTIVE_DOF);
-	qacc_d = qddot.back().segment(6, ACTIVE_DOF);
+
+	// qpos_d = robot.q + delta_q.back().segment(6, ACTIVE_DOF);
+	// qvel_d = qdot.back().segment(6, ACTIVE_DOF);
+	// qacc_d = qddot.back().segment(6, ACTIVE_DOF);
+	qpos_d = robot.q + delta_q[3].segment(6, ACTIVE_DOF);
+	qvel_d = qdot[3].segment(6, ACTIVE_DOF);
+	qacc_d = qddot[3].segment(6, ACTIVE_DOF);
 
 	std::cout << "---------------------------------------------------------------------" << std::endl;
 	std::cout << "[computeTaskPriorityKinematics] qpos_d: " << qpos_d.transpose().format(fmt) << std::endl;
@@ -611,6 +662,8 @@ void CRobotControl::computeControlInput()
 	/////// @todo : 5) DynWBC, solve qp to find delta qddot and delta contact force, finding optimal solution
 	//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 	torq_ff.setZero();
+	// qpos_d.setZero();
+	// qvel_d.setZero();
 	// qddot_d +=  qddot_delta
 	// F_C = f_qp + f_delta
 	// torq_ff = M_mat_q * xi_ddot_C + C_mat_q * robot.xidot + g_vec_q;
@@ -628,8 +681,8 @@ void CRobotControl::computeControlInput()
 	/////// @todo : 6) Joint Level Controller
 	//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 	joint_torq = torq_ff + K_qp * (qpos_d - robot.q) + K_qv * (qvel_d - robot.qdot);
-	// std::cout << "---------------------------------------------------------------------" << std::endl;
-	// std::cout << "[computeJointLevelController] joint_torq: " << joint_torq.transpose().format(fmt) << std::endl << std::endl;
+	std::cout << "---------------------------------------------------------------------" << std::endl;
+	std::cout << "[computeJointLevelController] joint_torq: " << joint_torq.transpose().format(fmt) << std::endl << std::endl;
 }
 
 
