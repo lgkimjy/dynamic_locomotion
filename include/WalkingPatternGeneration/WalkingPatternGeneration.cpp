@@ -233,4 +233,5 @@ void WalkingPatternGeneration::com_trajectory_generation()
     com_dot_trajectory = -omega * (com_trajectory - dcm_trajectory);
     com_ddot_trajectory = com_dot_trajectory / control_period;
     com_trajectory = com_dot_trajectory * control_period + com_trajectory;
+    com_trajectory(2) = z0;
 }
