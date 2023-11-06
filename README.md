@@ -11,7 +11,7 @@ Robot Walking in desired velocity (optimal DCM + task-prioritized + KinWBC + Dyn
   - [x] QP-based Swing Foot Trajectory Generation (eigen-quadprogpp)
 - [x] Reaction Force Deployment
   - [x] Centroidal Dyanmics
-  - [ ] Solve using QP, in every contact states 
+  - [x] Solve using QP, in every contact states 
 - [ ] KinWBC
   - [ ] Task-Prioritized ( 4 tasks )
 - [ ] DynWBC
