@@ -12,8 +12,8 @@ Robot Walking in desired velocity (optimal DCM + task-prioritized + KinWBC + Dyn
 - [x] Reaction Force Deployment
   - [x] Centroidal Dyanmics
   - [x] Solve using QP, in every contact states 
-- [ ] KinWBC
-  - [ ] Task-Prioritized ( 4 tasks )
+- [x] KinWBC
+  - [x] Task-Prioritized ( 4 tasks )
   - [ ] kinematics verification check
 - [ ] DynWBC
   - [ ] QP formulation (quadprogg)
