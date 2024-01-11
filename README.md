@@ -15,10 +15,10 @@ Robot Walking in desired velocity (optimal DCM + task-prioritized + KinWBC + Dyn
   - [x] Solve using QP, in every contact states 
 - [x] KinWBC
   - [x] Task-Prioritized ( 4 tasks )
-  - [ ] kinematics verification check
-- [ ] DynWBC
-  - [ ] QP formulation (quadprogg)
-  - [ ] find $\delta_{\ddot{q}}$ and $\delta_{f}$
+  - [x] kinematics verification check
+- [x] DynWBC
+  - [x] QP formulation (eigen-quadprogg)
+  - [x] find $\delta_{\ddot{q}}$ and $\delta_{f}$
 - [x] Joint Level Controller
 
 ---
