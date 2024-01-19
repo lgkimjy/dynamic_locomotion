@@ -5,7 +5,7 @@ Robot Walking in desired velocity (optimal DCM + task-prioritized + KinWBC + Dyn
 ---
 
 ### TODO
-- [ ] Modulize the Classes
+- [x] Modulize the Classes
 - [x] Nominal Gait Planning (DCM *or* Raibert Heuristic)
   - [x] Swing Foot Trajectory Generator
   - [x] CoM Trajectory Generator
