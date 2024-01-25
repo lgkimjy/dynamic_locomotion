@@ -20,6 +20,7 @@ Robot Walking in desired velocity (optimal DCM + task-prioritized + KinWBC + Dyn
   - [x] QP formulation (eigen-quadprogg)
   - [x] find $\delta_{\ddot{q}}$ and $\delta_{f}$
 - [x] Joint Level Controller
+- [ ] visualize data, logger
 
 ---
 
