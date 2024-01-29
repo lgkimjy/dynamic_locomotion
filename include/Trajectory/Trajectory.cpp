@@ -23,7 +23,7 @@ void QuinticTrajecotryProfile::quintic_trajectory_generation(Eigen::Vector3d ini
     is_moving_flag = true;
 }
 
-void QuinticTrajecotryProfile::compute()
+void QuinticTrajecotryProfile::compute(double dt)
 {
     if(moving_time <= final_time) {
         pos = coeff(0) + coeff(1)*moving_time + coeff(2)*pow(moving_time,2) + coeff(3)*pow(moving_time,3) + coeff(4)*pow(moving_time,4) + coeff(5)*pow(moving_time,5);
@@ -31,9 +31,10 @@ void QuinticTrajecotryProfile::compute()
         acc = 2*coeff(2) + 6*coeff(3)*moving_time + 12*coeff(4)*pow(moving_time,2) + 20*coeff(5)*pow(moving_time,3);
     }
     else {
-        // moving_time = 0.0;
+        moving_time = 0.0;
         is_moving_flag = false;
     }
+    moving_time += dt;
 }
 
 double QuinticTrajecotryProfile::get_pos()
