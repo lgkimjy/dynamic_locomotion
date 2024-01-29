@@ -562,7 +562,6 @@ void CRobotControl::computeControlInput()
 
 
 	// LOGGING
-	std::cout << robot.pdot_B[0] << std::endl;
 	if(stateMachine == DOUBLE_STANCE)		CLogger.RF_LOG.add(sim_time, f(0), f(1), f(2), f(3), f(4), f(5), log_rf(0), log_rf(1), log_rf(2), log_rf(3), log_rf(4), log_rf(5), log_rf_delta(0), log_rf_delta(1), log_rf_delta(2), log_rf_delta(3), log_rf_delta(4), log_rf_delta(5));
 	else if (stateMachine == LEFT_CONTACT) 	CLogger.RF_LOG.add(sim_time, f(0), f(1), f(2), 0,0,0, log_rf(0), log_rf(1), log_rf(2), 0,0,0, log_rf_delta(0), log_rf_delta(1), log_rf_delta(2), 0,0,0);
 	else if (stateMachine == RIGHT_CONTACT) CLogger.RF_LOG.add(sim_time, 0,0,0, f(0), f(1), f(2), 0,0,0, log_rf(0), log_rf(1), log_rf(2), 0,0,0, log_rf_delta(0), log_rf_delta(1), log_rf_delta(2));
