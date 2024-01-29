@@ -560,8 +560,8 @@ int main(int argc, char** argv) {
 #elif defined(ROBOT9)
 	const char* filename = "../model/Baxter/Baxter.xml";
 #elif defined(ROBOT10)
-  const char* filename = "../model/Biped/template_pointfoot_RRP.xml";    // Prismatic
-  // const char* filename = "../model/Biped/template_pointfoot_RRR.xml";    // Knee Revolute Joint
+  // const char* filename = "../model/Biped/template_pointfoot_RRP.xml";    // Prismatic
+  const char* filename = "../model/Biped/template_pointfoot_RRR.xml";    // Knee Revolute Joint
 #endif
 ////////////////////////////// USER CODE : END //////////////////////////////
 
