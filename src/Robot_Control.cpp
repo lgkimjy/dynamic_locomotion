@@ -314,7 +314,7 @@ void CRobotControl::computeControlInput()
 	/////// @todo : 1) Gait Swtiching & Scheduling
 	//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 	// contactEstimator();
-	if(sim_time <= 2.5)
+	if(sim_time <= 2.0)
 	{
 		contactState = MAGENTA + std::string("double_stance") + RESET;
 
@@ -406,7 +406,7 @@ void CRobotControl::computeControlInput()
 	std::cout << "-------------------------------------------- [computeTaskPriorityKinematics] --------------------------------------------" << std::endl;
 	kinWBC.clearTask();
 	////// Task 1: Maintaining CoM Position
-	kinWBC.assignTask(3, robot.J_CoM, robot.Jdot_CoM, robot.p_CoM, p_CoM_d, pdot_CoM_d, pddot_CoM_d);
+	// kinWBC.assignTask(3, robot.J_CoM, robot.Jdot_CoM, robot.p_CoM, p_CoM_d, pdot_CoM_d, pddot_CoM_d);
 	////// Task 2: Maintaining Posture
 	Eigen::Quaterniond	quat_err, quat_cur, quat_des;
 	quat_des.w() = 1.0;
@@ -423,47 +423,47 @@ void CRobotControl::computeControlInput()
     Eigen::Vector3d ori_err;
     convert(quat_err, ori_err);
 
-	kinWBC.assignTask(2, Jr_lnk[0].block(0, 0, 2, 12), Jdotr_lnk[0].block(0, 0, 2, 12), Eigen::VectorXd(2).setZero(), ori_err.segment(0, 2), Eigen::VectorXd(2).setZero(), Eigen::VectorXd(2).setZero());	// Roll, Pitch
+	// kinWBC.assignTask(2, Jr_lnk[0].block(0, 0, 2, 12), Jdotr_lnk[0].block(0, 0, 2, 12), Eigen::VectorXd(2).setZero(), ori_err.segment(0, 2), Eigen::VectorXd(2).setZero(), Eigen::VectorXd(2).setZero());	// Roll, Pitch
 	// kinWBC.assignTask(3, Jr_lnk[0], Jdotr_lnk[0], Eigen::VectorXd(3).setZero(), ori_err, Eigen::VectorXd(3).setZero(), Eigen::VectorXd(3).setZero());	// Roll, Pitch, Yaw
 
-	// Eigen::Matrix<double, 3, TOTAL_DOF> IJRR_J;
-	// IJRR_J.setZero();
-	// Eigen::Matrix<double, 3, TOTAL_DOF> IJRR_Jdot;
-	// IJRR_Jdot.setZero();
-	// Eigen::Vector3d IJRR_task_pos_des;
-	// IJRR_task_pos_des.setZero();
-	// Eigen::Vector3d IJRR_task_pos;
-	// IJRR_task_pos.setZero();
-	// Eigen::Vector3d IJRR_task_vel;
-	// IJRR_task_vel.setZero();
-	// Eigen::Vector3d IJRR_task_acc;
-	// IJRR_task_acc.setZero();
+	Eigen::Matrix<double, 3, TOTAL_DOF> IJRR_J;
+	IJRR_J.setZero();
+	Eigen::Matrix<double, 3, TOTAL_DOF> IJRR_Jdot;
+	IJRR_Jdot.setZero();
+	Eigen::Vector3d IJRR_task_pos_des;
+	IJRR_task_pos_des.setZero();
+	Eigen::Vector3d IJRR_task_pos;
+	IJRR_task_pos.setZero();
+	Eigen::Vector3d IJRR_task_vel;
+	IJRR_task_vel.setZero();
+	Eigen::Vector3d IJRR_task_acc;
+	IJRR_task_acc.setZero();
 
-	// IJRR_J.block(0,0,1, TOTAL_DOF) = robot.J_CoM.block(2, 0, 1, TOTAL_DOF);
-	// IJRR_Jdot.block(0,0,1, TOTAL_DOF) = robot.Jdot_CoM.block(2, 0, 1, TOTAL_DOF);
+	IJRR_J.block(0,0,1, TOTAL_DOF) = robot.J_CoM.block(2, 0, 1, TOTAL_DOF);
+	IJRR_Jdot.block(0,0,1, TOTAL_DOF) = robot.Jdot_CoM.block(2, 0, 1, TOTAL_DOF);
 
-	// IJRR_J.block(1,0,1, TOTAL_DOF) = Jr_lnk[0].block(0, 0, 1, TOTAL_DOF);
-	// IJRR_Jdot.block(1,0,1, TOTAL_DOF) = Jdotr_lnk[0].block(0, 0, 1, TOTAL_DOF);
+	IJRR_J.block(1,0,1, TOTAL_DOF) = Jr_lnk[0].block(0, 0, 1, TOTAL_DOF);
+	IJRR_Jdot.block(1,0,1, TOTAL_DOF) = Jdotr_lnk[0].block(0, 0, 1, TOTAL_DOF);
 
-	// IJRR_J.block(2,0,1, TOTAL_DOF) = Jr_lnk[0].block(1, 0, 1, TOTAL_DOF);
-	// IJRR_Jdot.block(2,0,1, TOTAL_DOF) = Jdotr_lnk[0].block(1, 0, 1, TOTAL_DOF);
+	IJRR_J.block(2,0,1, TOTAL_DOF) = Jr_lnk[0].block(1, 0, 1, TOTAL_DOF);
+	IJRR_Jdot.block(2,0,1, TOTAL_DOF) = Jdotr_lnk[0].block(1, 0, 1, TOTAL_DOF);
 
-	// IJRR_task_pos_des(0) = p_CoM_d(2);
-	// IJRR_task_pos(0) = robot.p_CoM(2);
-	// IJRR_task_vel(0) = 0.0;
-	// IJRR_task_acc(0) = 0.0;
+	IJRR_task_pos_des(0) = p_CoM_d(2);
+	IJRR_task_pos(0) = robot.p_CoM(2);
+	IJRR_task_vel(0) = 0.0;
+	IJRR_task_acc(0) = 0.0;
 
-	// IJRR_task_pos_des(1) = ori_err(0);
-	// IJRR_task_pos(1) = 0.0;
-	// IJRR_task_vel(1) = 0.0;
-	// IJRR_task_acc(1) = 0.0;
+	IJRR_task_pos_des(1) = ori_err(0);
+	IJRR_task_pos(1) = 0.0;
+	IJRR_task_vel(1) = 0.0;
+	IJRR_task_acc(1) = 0.0;
 
-	// IJRR_task_pos_des(2) = ori_err(1);
-	// IJRR_task_pos(2) = 0.0;
-	// IJRR_task_vel(2) = 0.0;
-	// IJRR_task_acc(2) = 0.0;
+	IJRR_task_pos_des(2) = ori_err(1);
+	IJRR_task_pos(2) = 0.0;
+	IJRR_task_vel(2) = 0.0;
+	IJRR_task_acc(2) = 0.0;
 
-	// kinWBC.assignTask(3, IJRR_J, IJRR_Jdot, IJRR_task_pos, IJRR_task_pos_des, IJRR_task_vel, IJRR_task_acc);
+	kinWBC.assignTask(3, IJRR_J, IJRR_Jdot, IJRR_task_pos, IJRR_task_pos_des, IJRR_task_vel, IJRR_task_acc);
 
 	std::cout << "[" << contactState << "] " << stateMachine << " ( LEFT_CONTACT: " << LEFT_CONTACT << ", RIGHT_CONTACT: " << RIGHT_CONTACT << " )" << std::endl;
 	if(stateMachine == DOUBLE_STANCE) {
@@ -522,8 +522,11 @@ void CRobotControl::computeControlInput()
 	dynWBC.computeDynWBC(robot, qddot_cmd, CCoMDynamics.opt_rho, kinWBC.J_c, kinWBC.Jdot_c);
 	dynWBC.checkComputation();
 	qddot = qddot_cmd + dynWBC.delta_qddot;
+	Eigen::VectorXd log_rf = dynWBC.R_C * dynWBC.Ubar * CCoMDynamics.opt_rho;
+	Eigen::VectorXd log_rf_delta = dynWBC.R_C * dynWBC.Ubar * dynWBC.delta_rho;
 	rho = CCoMDynamics.opt_rho + dynWBC.delta_rho;
-	f = dynWBC.Ubar * dynWBC.R_C * rho;
+
+	f = dynWBC.R_C * dynWBC.Ubar * rho;
 
 	std::cout << "[ command ] qddot: " << qddot.transpose().format(fmt) << std::endl;
 	std::cout << "[ command ]  rho : " << rho.transpose().format(fmt) << std::endl;
@@ -541,8 +544,8 @@ void CRobotControl::computeControlInput()
 	torq_ff.setZero();
 	torq_ff = M_mat_q * qddot + C_mat_q * robot.xidot + g_vec_q;
 	torq_ff -= (kinWBC.J_c.transpose() * f).segment<6>(6);
+	// torq_ff -= (kinWBC.J_c.transpose() * log_rf).segment<6>(6);
 	std::cout << "[ command ] torq_ff : " << torq_ff.transpose().format(fmt) << std::endl;
-	// CLogger.DynWBC_LOG.add(sim_time, qddot(6), qddot(7), qddot(8), qddot(9), qddot(10), qddot(11), torq_ff(0), torq_ff(1), torq_ff(2), torq_ff(3), torq_ff(4), torq_ff(5));
 
 
 	//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -556,6 +559,15 @@ void CRobotControl::computeControlInput()
 	std::cout << "-------------------------------------------- [JointLevelController] --------------------------------------------" << std::endl;
 	std::cout << "[ " << GREEN << sim_time << RESET << " ]" << "[ " << contactState << " ]" << \
 				"[computeJointLevelController] joint_torq: " << joint_torq.transpose().format(fmt) << std::endl << std::endl << std::endl;
+
+
+	// LOGGING
+	std::cout << robot.pdot_B[0] << std::endl;
+	if(stateMachine == DOUBLE_STANCE)		CLogger.RF_LOG.add(sim_time, f(0), f(1), f(2), f(3), f(4), f(5), log_rf(0), log_rf(1), log_rf(2), log_rf(3), log_rf(4), log_rf(5), log_rf_delta(0), log_rf_delta(1), log_rf_delta(2), log_rf_delta(3), log_rf_delta(4), log_rf_delta(5));
+	else if (stateMachine == LEFT_CONTACT) 	CLogger.RF_LOG.add(sim_time, f(0), f(1), f(2), 0,0,0, log_rf(0), log_rf(1), log_rf(2), 0,0,0, log_rf_delta(0), log_rf_delta(1), log_rf_delta(2), 0,0,0);
+	else if (stateMachine == RIGHT_CONTACT) CLogger.RF_LOG.add(sim_time, 0,0,0, f(0), f(1), f(2), 0,0,0, log_rf(0), log_rf(1), log_rf(2), 0,0,0, log_rf_delta(0), log_rf_delta(1), log_rf_delta(2));
+	// CLogger.DynWBC_LOG.add(sim_time, qddot(6), qddot(7), qddot(8), qddot(9), qddot(10), qddot(11), torq_ff(0), torq_ff(1), torq_ff(2), torq_ff(3), torq_ff(4), torq_ff(5));
+	CLogger.BodyVel_LOG.add(sim_time, des_lin_vel(0), robot.pdot_B[0]);
 	CLogger.JointTorque_LOG.add(sim_time, joint_torq(0), joint_torq(1), joint_torq(2), joint_torq(3), joint_torq(4), joint_torq(5));
 	CLogger.CoM_LOG.add(sim_time, robot.p_CoM(0), robot.p_CoM(1), robot.p_CoM(2));
 	CLogger.SWING.add(sim_time, p_EE[0](0), p_EE[0](1), p_EE[0](2), p_EE[1](0), p_EE[1](1), p_EE[1](2));

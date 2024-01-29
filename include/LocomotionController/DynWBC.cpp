@@ -119,7 +119,7 @@ void DynWBC::computeDynWBC(CARBML robot, Eigen::Matrix<double, TOTAL_DOF, 1> qdd
     }
     else
     {
-        // std::cout << "DynWBC solved" << std::endl;
+        std::cout << GREEN << "DynWBC solved" << RESET << std::endl;
         opt_dyn = dyn_solver.result();
         delta_qddot = opt_dyn.segment(0, TOTAL_DOF);
         delta_rho = opt_dyn.segment(TOTAL_DOF, _dim_G - TOTAL_DOF);

@@ -125,7 +125,7 @@ void CoMDynamics::computeReactionForce(CARBML robot, Eigen::Vector3d desired_com
     }
     else
     {
-        // std::cout << "CoM Dynamics solved" << std::endl;
+        std::cout << GREEN << "CoM Dynamics solved" << RESET << std::endl;
         opt_rho = reaction_force_solver.result();
     }
 	f = R_C * Ubar * opt_rho;
