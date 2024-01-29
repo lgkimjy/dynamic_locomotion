@@ -1,0 +1,13 @@
+CoMDynamics:
+  CoM_translational_gains:
+    kp: [ 10, 10, 10 ]
+    kd: [ 0.01, 0.01, 0.01 ]
+  body_angular_acceleration_gains:
+    kp: [ 10, 10, 10000 ]
+    kd: [ 0.01, 0.01, 1000 ]
+  qp_weight_gain: 10000
+  hess_regul: 0.001
+
+ContactWrench:
+  k_f: 1.0
+  k_mu: 1.0

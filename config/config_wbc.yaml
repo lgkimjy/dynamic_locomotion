@@ -1,0 +1,17 @@
+DynWBC:
+  DSP:                                            ### Double Support Phase
+    W1: [ 1000, 1000, 1000, 1000, 1000, 1000,     # floating base 12x1
+          1000, 1000, 1000, 1000, 1000, 1000 ]    # active joints 12x1
+    W2: [ 10, 10, 10, 10, 10, 10,                 # left foot 6x1
+          10, 10, 10, 10, 10, 10 ]                # right foot 6x1
+  SSP:                                            ### Single Support Phase
+    W1: [ 1000, 1000, 1000, 1000, 1000, 1000,     # floating base 12x1
+          1000, 1000, 1000, 1000, 1000, 1000 ]    # active joints 12x1
+    W2: [ 10, 10, 10, 10, 10, 10 ]                # reaction fore 6x1
+  delta_qddot_weight: 0.0001
+  delta_rho_weight: 0.0001
+  hess_regularization: 0.0001
+
+ContactWrench:
+  k_f: 1.0
+  k_mu: 1.0
