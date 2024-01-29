@@ -1,5 +1,3 @@
-//
-//
 #include "Robot_Control.h"
 
 
@@ -42,9 +40,6 @@ void CRobotControl::InitializeSystem(const mjModel* model_mj)
 
 	/////	Set controller parameters
 	initCtrlParameters(model_mj);
-
-	/////	Set locomotion parameters
-	initLocomotionVariables();
 
 #ifdef PRINT_END_EFFECTOR_INFO
 	outputEEInformation();
@@ -104,6 +99,10 @@ void CRobotControl::initEEParameters(const mjModel* model)
 	pdot_EE_d.reserve(no_of_EE);
 	pddot_EE_d.reserve(no_of_EE);
 
+	p_CoM_d.setZero();
+	pdot_CoM_d.setZero();
+	pddot_CoM_d.setZero();
+
 	for (int i = 0; i < no_of_EE; i++) {
 		p_EE[i].setZero();
 		R_EE[i].setIdentity();
@@ -151,46 +150,6 @@ void CRobotControl::outputEEInformation()
 }
 
 
-
-void CRobotControl::initCtrlParameters(const mjModel* model_mj)
-{
-	K_qp = 1000.0 * K_qp.setIdentity();
-	K_qv = 100.0 * K_qv.setIdentity();
-
-	Kp_p = 100.0 * Kp_p.setIdentity();
-	Kd_p = 20.0 * Kd_p.setIdentity();
-
-	// Centroidal Dynamics Gain
-	double K_f = 1.0;
-	double K_mu = 1.0;
-	ContactWrench.init(K_f, K_mu);
-
-	Kp_p.setIdentity();
-	Kd_p.setIdentity();
-	Kp_omega.setIdentity();
-	Kd_omega.setIdentity();
-}
-
-void CRobotControl::initLocomotionVariables()
-{
-	des_lin_vel.setZero();
-	des_lin_vel = {0.25, 0.0, 0.0};
-	// des_lin_vel = {0.0, 0.0, 0.0};
-	des_ang_vel.setZero();
-	step_time = 0.0;
-
-	stateMachine = RIGHT_CONTACT;
-	WPG.initialize_nominal_param();
-
-	p_EE_d[0] << 0.0, WPG.lp/2, 0.0;
-	prev_p_EE_d[0] << 0.0, WPG.lp/2, 0.0;
-	next_p_EE_d[0] << 0.0, WPG.lp/2, 0.0;
-	p_EE_d[1] << 0.0, -WPG.lp/2, 0.0;
-	prev_p_EE_d[1] << 0.0, -WPG.lp/2, 0.0;
-	next_p_EE_d[1] << 0.0, -WPG.lp/2, 0.0;
-	trajectory.set_mid_air_height(0.15);
-	trajectory.set_costs(1e1, 1e1, 1e1, 1e-6);
-}
 
 ////////////////////////////////////////////////////////////////////////////////
 //	USER Control Core !!
@@ -242,6 +201,10 @@ void CRobotControl::UserControl(mjModel* model, mjData* data)
 		++count_ctrl;
 	}
 	++count_sim;
+
+	// if (count_ctrl % int(2.0 / 0.001) == 0) {
+	// 	data->xfrc_applied[6] = 1000;
+	// }
 }
 
 
@@ -302,387 +265,300 @@ void CRobotControl::getFeedbackInformation(const mjData* data)
 	sim_time = data->time;
 }
 
-/**
- *	@brief compute centroidal dynamics using qp solver, w/ state of robot stance
- * 
- *	@param[in] stateMachine : state of robot stance
- *	@todo
- *		1. orientation error using exponential map representation must be re-checked.
- *		2. centroidal rotational inertia matrix must be re-checked.
- *		3. R_C, which is roation matrix is defined w/ identity matrix as assuming Contact frame equals to Inertial frame,
- *		but in future, it could need to be re-defined w.r.t Contact frame.
- */
-void CRobotControl::computeCentroidalDynamics(stateMachineTypeDef stateMachine)
+
+
+void CRobotControl::initCtrlParameters(const mjModel* model_mj)
 {
-	std::cout << "--------------------------------------------" << FUNC_TAG << "--------------------------------------------" << std::endl;
-	S = 10 * S.setIdentity();
-	alpha = 0.001;
+	yamlReader();
 
-	A.setZero();
-	A.block(0, 0, 3, 3) = Eigen::Matrix3d::Identity();
-	A.block(0, 3, 3, 3) = Eigen::Matrix3d::Identity();
-	A.block(3, 0, 3, 3) = Skew(p_EE[0] - robot.p_CoM);	// left leg
-	A.block(3, 3, 3, 3) = Skew(p_EE[1] - robot.p_CoM);	// right leg
+	contactState = "double_stance";
 
-	R_C.setZero();
-	R_C_left.setIdentity();
-	R_C_right.setIdentity();
-	R_C.block(0, 0, 3, 3) = R_C_left;
-	R_C.block(3, 3, 3, 3) = R_C_right;
+	des_lin_vel.setZero();
 
-	C_contact_cone.setZero();
-	ContactWrench.computeContactWrenchCone();
-	C_contact_cone.block(0, 0, 3, 6) = ContactWrench.W;
-	C_contact_cone.block(3, 6, 3, 6) = ContactWrench.W;
-	
-	f_prime = R_C * C_contact_cone;
+	step_time = 0.0;
+	prev_sim_time = 0.0;
+	stateMachine = DOUBLE_STANCE;
+	prev_state = DOUBLE_STANCE;
 
-	// std::cout << FUNC_TAG << "A matrix rank: " << A.fullPivLu().rank() << std::endl;
-	// std::cout << FUNC_TAG << "Desired_com_pos: " << desired_com_pos.transpose().format(fmt) << std::endl;
-	// std::cout << FUNC_TAG << "robot.p_CoM : " << robot.p_CoM.transpose().format(fmt) << std::endl;
+	WPG.initialize_nominal_param();
 
-	// Desired Centroidal Dynamics (PD control law)
-	Eigen::Matrix3d desiredRotationMatrix;
-	Eigen::Vector3d desired_omega_B;
-	desiredRotationMatrix.setIdentity();
-	desired_omega_B.setZero();
-    Eigen::Matrix3d errorMatrix = desiredRotationMatrix * robot.R_B.transpose();
-    Eigen::AngleAxisd errorAngleAxis(errorMatrix);
- 
-	pddot_c_d = Kp_p * (desired_com_pos - robot.p_CoM) + Kd_p * (desired_com_vel - robot.pdot_CoM);		// desired COM acceleration using PD Controller
-	omegadot_b_d = Kp_omega * (errorAngleAxis.axis()) + Kd_omega * (desired_omega_B - robot.omega_B);	// desired angular acceleration using PD Controller
-	g_vec << 0.0, 0.0, robot.getGravityConst();
-
-	b_d.segment<3>(0) = (robot.getTotalMass() * (g_vec));						// total mass * (CoM acceleration + gravity)
-	// b_d.segment<3>(0) = (robot.getTotalMass() * (pddot_c_d + g_vec));		// total mass * (gravity) -> just for checking reaction ground force w/o desired COM acceleration
-	b_d.segment<3>(3) = (robot.I_G_BCS[0] * omegadot_b_d);						// centroidal rotational inertia * body angular acceleration
-
-	/*  define objective function  */
-	G =	(A * f_prime).transpose() * S * (A * f_prime);
-	G += alpha * Eigen::MatrixXd::Identity(12, 12);								// w/o alpha, which is force nomralization factor, cholesky decomposition will be errroed in quadprogpp
-	g0 = -1 * (A * f_prime).transpose() * S * b_d;
-	
-	/*  Inequality constraints.  */
-	Ci.block(0, 0, 6, 6) = ContactWrench.E_cone;
-	Ci.block(6, 6, 6, 6) = ContactWrench.E_cone;
-	ci = Eigen::Matrix<double, 12, 1>::Zero();
-	
-	/*  Equality constraints.	*/
-	Ce = Eigen::Matrix<double, 12, 12>::Zero();
-	ce = Eigen::Matrix<double, 12, 1>::Zero();
-	
-	// std::cout << FUNC_TAG << std::endl;
-	// std::cout << "G: " << std::endl << G.format(fmt) << std::endl;
-	// std::cout << "g0: " << g0.transpose().format(fmt) << std::endl;
-	// std::cout << "CE: : " << std::endl << Ce.format(fmt) << std::endl;
-	// std::cout << "ce: " << ce.transpose().format(fmt) << std::endl;
-	// std::cout << "CI: " << std::endl << Ci.format(fmt) << std::endl;
-	// std::cout << "ci: " << ci.transpose().format(fmt) << std::endl;
-
-	/* solve qp */
-	f_qp.solve_QuadProg(G, g0, Ci, ci, opt_rho);			// w/o equality constraints
-	// f_qp.solve_QuadProg(G, g0, Ce, ce, Ci, ci, opt_rho);	// w/ equality constraints, error occurs: terminating with uncaught exception of type std::runtime_error: Constraints are linearly dependent, when Ce and ci is set to zero
-	f = f_prime * opt_rho;
-
-	// std::cout << FUNC_TAG << "p_EE[0] - robot.p_CoM: " << (p_EE[0] - robot.p_CoM).transpose().format(fmt) << std::endl;
-	// std::cout << FUNC_TAG << "p_EE[1] - robot.p_CoM: " << (p_EE[1] - robot.p_CoM).transpose().format(fmt) << std::endl;
-	// std::cout << FUNC_TAG << "skew(p_EE[0] - robot.p_CoM): " << std::endl << Skew(p_EE[0] - robot.p_CoM).format(fmt) << std::endl;
-	// std::cout << FUNC_TAG << "skew(p_EE[1] - robot.p_CoM): " << std::endl << Skew(p_EE[1] - robot.p_CoM).format(fmt) << std::endl;
-	// std::cout << FUNC_TAG << "RC: " << std::endl << R_C.format(fmt) << std::endl;
-	// std::cout << FUNC_TAG << "U: " << std::endl << C_contact_cone.format(fmt) << std::endl;
-	// std::cout << FUNC_TAG << "opt_rho: " << opt_rho.transpose().format(fmt) << std::endl;
-	// std::cout << FUNC_TAG << "l_foot reaction force: " << f.head(3).transpose().format(full_fmt) << std::endl;
-	// std::cout << FUNC_TAG << "r_foot reaction force: " << f.tail(3).transpose().format(full_fmt) << std::endl;
+	p_EE_d[0] << 0.0, WPG.lp/2, 0.0;
+	prev_p_EE_d[0] = next_p_EE_d[0] = p_EE_d[0];
+	p_EE_d[1] << 0.0, -WPG.lp/2, 0.0;
+	prev_p_EE_d[1] = next_p_EE_d[1] = p_EE_d[1];	
 }
 
 
-/**
- * @brief 
- * 
- * @param stateMachine 
- */
-void CRobotControl::assignTaskPriority(stateMachineTypeDef stateMachine)
+void CRobotControl::contactEstimator()
 {
-	//// 0: supporting leg in fixed position
-	//// 1:	maintaining posture5
-	//// 2:	maintaining CoM position
-	//// 3: swing leg to follow predetermined trajectory
-	std::cout << "--------------------------------------------" << FUNC_TAG << "--------------------------------------------" << std::endl;
+	std::cout << p_lnk[3](2) << " " << p_lnk[6](2) << std::endl;
+	if(p_lnk[3](2) <= 0.175 && p_lnk[6](2) <= 0.175) {
+		// stateMachine = DOUBLE_STANCE;
+		tmp_contactState = "double_stance";
+	}
+	else if (p_lnk[3](2) <= 0.175) {
+		// stateMachine = LEFT_CONTACT;
+		tmp_contactState = "left_contact";
+	}
+	else if (p_lnk[6](2) <= 0.175) {
+		// stateMachine = RIGHT_CONTACT;
+		tmp_contactState = "right_contact";
+	}
 }
 
-
-void CRobotControl::computeTaskPriorityKinematics()
-{
-	std::cout << "--------------------------------------------" << FUNC_TAG << "--------------------------------------------" << std::endl;
-
-	Eigen::Vector3d delta_q;
-	std::cout << delta_q.transpose() << std::endl;
-}
 
 
 void CRobotControl::computeControlInput()
 {
-	///////////////////////////////////////////////////////////////////////////
-    /*  step cycle  */
-	///////////////////////////////////////////////////////////////////////////
-	/////// @todo : 1) gait switcher & scheduler
-	/////// @todo : 2) Walking Pattern Generation
-	if(sim_time - prev_sim_time > step_time)
+	//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+	/////// @todo : 1) Gait Swtiching & Scheduling
+	//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+	// contactEstimator();
+	if(sim_time <= 2.5)
 	{
-        std::cout << BLUE << "--------------------------------------------STEP CYCLE--------------------------------------------" << RESET << std::endl;
+		contactState = MAGENTA + std::string("double_stance") + RESET;
 
-		prev_sim_time = sim_time;
+		des_lin_vel << 0.0, 0.0, 0.0;
+		reactive_stepper.set_desired_CoM_velocity(des_lin_vel);
+		reactive_stepper.stand_still(sim_time, robot, stateMachine, p_EE[0], p_EE[1]);
 
-        if(prev_state == LEFT_CONTACT)
-            stateMachine = RIGHT_CONTACT;
-        else
-            stateMachine = LEFT_CONTACT;
+		prev_state = DOUBLE_STANCE;
+		pdot_CoM_d = reactive_stepper.get_feasible_com_velocity();
+		p_CoM_d.setZero();
+		p_CoM_d(2) = reactive_stepper.z0_;
+	}
+	else
+	{
+		if(sim_time - prev_sim_time >= reactive_stepper.step_duration_) 
+		{
+			std::cout << BLUE << "CONTACT SWITCH" << RESET << std::endl;
+			prev_sim_time = sim_time;
+			if(prev_state == DOUBLE_STANCE) 
+			{
+				prev_state = LEFT_CONTACT;
+			}
+			if(prev_state == LEFT_CONTACT) 
+			{
+				contactState = CYAN + std::string("right_contact") + RESET;
+				stateMachine = RIGHT_CONTACT;
+			}
+			else if(prev_state == RIGHT_CONTACT) 
+			{
+				contactState = YELLOW + std::string("left_contact") + RESET;
+				stateMachine = LEFT_CONTACT;
+			}
+		}
+		moving_time = sim_time - prev_sim_time;
 		
-		prev_p_EE_d[0] = next_p_EE_d[0];
-		prev_p_EE_d[1] = next_p_EE_d[1];
-		WPG.specifying_nominal_values(des_lin_vel, stateMachine);
-		step_time = WPG.nominal_T;
+		if(stateMachine == LEFT_CONTACT)
+			prev_state = LEFT_CONTACT;
+		else if(stateMachine == RIGHT_CONTACT)
+			prev_state = RIGHT_CONTACT;
 
-		if(stateMachine == LEFT_CONTACT) {
-			// LEFT SWING
-			next_p_EE_d[1](0) = prev_p_EE_d[0](0) + WPG.nominal_L;
-			next_p_EE_d[1](1) = WPG.nominal_W - WPG.lp/2;
-			WPG.dcm_offset(0) = prev_p_EE_d[0](0) + WPG.nominal_bx;
-			WPG.dcm_offset(1) = prev_p_EE_d[0](1) - WPG.nominal_by;
-			WPG.dcm_offset(2) = 0.0;
-        	prev_state = LEFT_CONTACT;
-		}
-        else if(stateMachine == RIGHT_CONTACT) {
-			// RIGHT SWING
-			next_p_EE_d[0](0) = prev_p_EE_d[1](0) + WPG.nominal_L;
-			next_p_EE_d[0](1) = WPG.nominal_W + WPG.lp/2;
-			WPG.dcm_offset(0) = prev_p_EE_d[1](0) + WPG.nominal_bx;
-			WPG.dcm_offset(1) = prev_p_EE_d[1](1) - WPG.nominal_by;
-			WPG.dcm_offset(2) = 0.0;
-        	prev_state = RIGHT_CONTACT;
-		}
-		succeed = true;
+		des_lin_vel << 0.0, 0.0, 0.0;
+		reactive_stepper.set_desired_CoM_velocity(des_lin_vel);
+		reactive_stepper.walking(moving_time, robot, stateMachine, p_EE_d[0], p_EE_d[1], robot.p_CoM, robot.pdot_CoM);
+		pdot_CoM_d = reactive_stepper.get_feasible_com_velocity();
+		p_CoM_d = robot.p_CoM + pdot_CoM_d * robot.getSamplingTime();
+		p_CoM_d(2) = reactive_stepper.z0_;
 	}
-    moving_time = sim_time - prev_sim_time;
+	// desired left & right foot traj & feasible CoM traj
+	p_EE_d[0] = reactive_stepper.get_desired_left_foot_postion();
+	pdot_EE_d[0] = reactive_stepper.get_desired_left_foot_velocity();
+	pddot_EE_d[0] = reactive_stepper.get_desired_left_foot_acceleration();
+	p_EE_d[1] = reactive_stepper.get_desired_right_foot_position();
+	pdot_EE_d[1] = reactive_stepper.get_desired_right_foot_velocity();
+	pddot_EE_d[1] = reactive_stepper.get_desired_right_foot_acceleration();
+	
+	// for visualization in MuJoCo and checking the data
+	next_p_EE_d[0] = reactive_stepper.get_next_support_foot_position();
+	CLogger.SWING_D.add(sim_time,  next_p_EE_d[0][0], next_p_EE_d[0][1], next_p_EE_d[1][0], next_p_EE_d[1][1],p_EE_d[0](0), p_EE_d[0](1), p_EE_d[0](2), p_EE_d[1](0), p_EE_d[1](1), p_EE_d[1](2), pdot_EE_d[0](0), pdot_EE_d[0](1), pdot_EE_d[0](2), pdot_EE_d[1](0), pdot_EE_d[1](1), pdot_EE_d[1](2), pddot_EE_d[0](0), pddot_EE_d[0](1), pddot_EE_d[0](2), pddot_EE_d[1](0), pddot_EE_d[1](1), pddot_EE_d[1](2));
+	CLogger.COM.add(sim_time, p_CoM_d(0), p_CoM_d(1), p_CoM_d(2), pdot_CoM_d(0), pdot_CoM_d(1), pdot_CoM_d(2));// desired_com_acc(0), desired_com_acc(1), desired_com_acc(2), WPG.dcm_trajectory(0), WPG.dcm_trajectory(1), WPG.dcm_trajectory(2),  WPG.dcm_offset(0), WPG.dcm_offset(1), WPG.dcm_offset(2));
 
-	if(stateMachine == LEFT_CONTACT) {
-		WPG.dcm_trajectory = (WPG.dcm_offset - prev_p_EE_d[0]) * std::exp(WPG.omega * moving_time) + prev_p_EE_d[0];
-		if (moving_time <= step_time - WPG.control_period)
-		{
-			succeed = succeed && trajectory.compute(prev_p_EE_d[1],
-							p_EE_d[1], pdot_EE_d[1], pddot_EE_d[1],
-							next_p_EE_d[1],
-							0.0, moving_time, step_time);
-		}
-		trajectory.get_next_state(moving_time + WPG.control_period, p_EE_d[1], pdot_EE_d[1], pddot_EE_d[1]);
-		// The current support foot does not move
-		p_EE_d[0] = prev_p_EE_d[0];
-		pdot_EE_d[0].setZero();
-		pddot_EE_d[0].setZero();
-	}
-	else {
-		WPG.dcm_trajectory = (WPG.dcm_offset - prev_p_EE_d[1]) * std::exp(WPG.omega * moving_time) + prev_p_EE_d[1];
-		if (moving_time <= step_time - WPG.control_period)
-		{
-			succeed = succeed && trajectory.compute(prev_p_EE_d[0],
-							p_EE_d[0], pdot_EE_d[0], pddot_EE_d[0],
-							next_p_EE_d[0],
-							0.0, moving_time, step_time);
-		}
-		trajectory.get_next_state(moving_time + WPG.control_period, p_EE_d[0], pdot_EE_d[0], pddot_EE_d[0]);
-		// The current support foot does not move
-		p_EE_d[1] = prev_p_EE_d[1];
-		pdot_EE_d[1].setZero();
-		pddot_EE_d[1].setZero();
-	}
-	WPG.com_trajectory_generation();
-	desired_com_pos = WPG.com_trajectory;
-	desired_com_vel = WPG.com_dot_trajectory;
-	desired_com_acc = WPG.com_ddot_trajectory;
-
-	// LOG stance, swing foot trajectory and CoM trajectory
-	SWING.add(sim_time, p_EE_d[0](0), p_EE_d[0](1), p_EE_d[0](2), p_EE_d[1](0), p_EE_d[1](1), p_EE_d[1](2),
-						pdot_EE_d[0](0), pdot_EE_d[0](1), pdot_EE_d[0](2), pdot_EE_d[1](0), pdot_EE_d[1](1), pdot_EE_d[1](2),
-						pddot_EE_d[0](0), pddot_EE_d[0](1), pddot_EE_d[0](2), pddot_EE_d[1](0), pddot_EE_d[1](1), pddot_EE_d[1](2));
-
-
-	///////////////////////////////////////////////////////////////////////////
-    /*  control cycle   */
-    ///////////////////////////////////////////////////////////////////////////
 	//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-	/////// 3) Centroidal Dynamics Ground Reaction Force Deployment ( QP solve )
+	/////// @todo : 3) Centroidal Dynamics Ground Reaction Force Deployment ( QP solve )
 	//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-	computeCentroidalDynamics(LEFT_CONTACT);
-
+	std::cout << "-------------------------------------------- [computeCoMDynamics] --------------------------------------------" << std::endl;
+	std::vector<Eigen::Vector3d> tmp_P_EE;
+	if(stateMachine == DOUBLE_STANCE) {
+		CCoMDynamics.setQPSize(12, 0, 12);
+		tmp_P_EE = {p_EE[0], p_EE[1]};
+	}
+	else if(stateMachine == LEFT_CONTACT) {
+		CCoMDynamics.setQPSize(6, 0, 6);
+		tmp_P_EE = {p_EE[0]};
+	}
+	else if(stateMachine == RIGHT_CONTACT) {
+		CCoMDynamics.setQPSize(6, 0, 6);
+		tmp_P_EE = {p_EE[1]};
+	}
+	CCoMDynamics.setGain();
+	Eigen::Matrix3d desired_orien_B;
+	Eigen::Vector3d desired_omega_B;
+	desired_orien_B.setIdentity();
+	desired_omega_B.setZero();
+	CCoMDynamics.computeReactionForce(robot, p_CoM_d, pdot_CoM_d, desired_orien_B, desired_omega_B, tmp_P_EE);
+	CCoMDynamics.checkComputation(stateMachine);
 
 	//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 	/////// @todo : 4) KinWBC ( Task Priority-based Control )
 	//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-	assignTaskPriority(LEFT_CONTACT);
-	computeTaskPriorityKinematics();
-	n_tasks = 4;
+	std::cout << "-------------------------------------------- [computeTaskPriorityKinematics] --------------------------------------------" << std::endl;
+	kinWBC.clearTask();
+	////// Task 1: Maintaining CoM Position
+	kinWBC.assignTask(3, robot.J_CoM, robot.Jdot_CoM, robot.p_CoM, p_CoM_d, pdot_CoM_d, pddot_CoM_d);
+	////// Task 2: Maintaining Posture
+	Eigen::Quaterniond	quat_err, quat_cur, quat_des;
+	quat_des.w() = 1.0;
+	quat_des.x() = 0.0;
+	quat_des.y() = 0.0;
+	quat_des.z() = 0.0;
 
-	task_x.reserve(n_tasks);
-	task_x.reserve(n_tasks);
-	task_x_d.reserve(n_tasks);
-	task_xdot_d.reserve(n_tasks);
-	task_xddot_d.reserve(n_tasks);
-	J_task.reserve(n_tasks);
-	Jdot_task.reserve(n_tasks);
+	quat_cur.w() = robot.quat_B(0);
+	quat_cur.x() = robot.quat_B(1);
+	quat_cur.y() = robot.quat_B(2);
+	quat_cur.z() = robot.quat_B(3);
 
-	if(stateMachine == LEFT_CONTACT) {
-		// TASK 0: Supporting Leg
-		J_task[0] = Jp_EE[0];
-		Jdot_task[0] = Jdotp_EE[0];
-		task_x[0] = p_EE[0];
-		task_x_d[0] = p_EE_d[0];
-		task_xdot_d[0] = pdot_EE_d[0];
-		task_xddot_d[0] = pddot_EE_d[0];
-		// TASK 3: Swing Leg
-		J_task[1] = Jp_EE[1];
-		Jdot_task[1] = Jdotp_EE[1];
-		task_x[1] = p_EE[1];
-		task_x_d[1] = p_EE_d[1];
-		task_xdot_d[1] = pdot_EE_d[1];
-		task_xddot_d[1] = pddot_EE_d[1]; 
+	quat_err = QuatMultiply(quat_des, quat_cur.conjugate());
+    Eigen::Vector3d ori_err;
+    convert(quat_err, ori_err);
+
+	kinWBC.assignTask(2, Jr_lnk[0].block(0, 0, 2, 12), Jdotr_lnk[0].block(0, 0, 2, 12), Eigen::VectorXd(2).setZero(), ori_err.segment(0, 2), Eigen::VectorXd(2).setZero(), Eigen::VectorXd(2).setZero());	// Roll, Pitch
+	// kinWBC.assignTask(3, Jr_lnk[0], Jdotr_lnk[0], Eigen::VectorXd(3).setZero(), ori_err, Eigen::VectorXd(3).setZero(), Eigen::VectorXd(3).setZero());	// Roll, Pitch, Yaw
+
+	// Eigen::Matrix<double, 3, TOTAL_DOF> IJRR_J;
+	// IJRR_J.setZero();
+	// Eigen::Matrix<double, 3, TOTAL_DOF> IJRR_Jdot;
+	// IJRR_Jdot.setZero();
+	// Eigen::Vector3d IJRR_task_pos_des;
+	// IJRR_task_pos_des.setZero();
+	// Eigen::Vector3d IJRR_task_pos;
+	// IJRR_task_pos.setZero();
+	// Eigen::Vector3d IJRR_task_vel;
+	// IJRR_task_vel.setZero();
+	// Eigen::Vector3d IJRR_task_acc;
+	// IJRR_task_acc.setZero();
+
+	// IJRR_J.block(0,0,1, TOTAL_DOF) = robot.J_CoM.block(2, 0, 1, TOTAL_DOF);
+	// IJRR_Jdot.block(0,0,1, TOTAL_DOF) = robot.Jdot_CoM.block(2, 0, 1, TOTAL_DOF);
+
+	// IJRR_J.block(1,0,1, TOTAL_DOF) = Jr_lnk[0].block(0, 0, 1, TOTAL_DOF);
+	// IJRR_Jdot.block(1,0,1, TOTAL_DOF) = Jdotr_lnk[0].block(0, 0, 1, TOTAL_DOF);
+
+	// IJRR_J.block(2,0,1, TOTAL_DOF) = Jr_lnk[0].block(1, 0, 1, TOTAL_DOF);
+	// IJRR_Jdot.block(2,0,1, TOTAL_DOF) = Jdotr_lnk[0].block(1, 0, 1, TOTAL_DOF);
+
+	// IJRR_task_pos_des(0) = p_CoM_d(2);
+	// IJRR_task_pos(0) = robot.p_CoM(2);
+	// IJRR_task_vel(0) = 0.0;
+	// IJRR_task_acc(0) = 0.0;
+
+	// IJRR_task_pos_des(1) = ori_err(0);
+	// IJRR_task_pos(1) = 0.0;
+	// IJRR_task_vel(1) = 0.0;
+	// IJRR_task_acc(1) = 0.0;
+
+	// IJRR_task_pos_des(2) = ori_err(1);
+	// IJRR_task_pos(2) = 0.0;
+	// IJRR_task_vel(2) = 0.0;
+	// IJRR_task_acc(2) = 0.0;
+
+	// kinWBC.assignTask(3, IJRR_J, IJRR_Jdot, IJRR_task_pos, IJRR_task_pos_des, IJRR_task_vel, IJRR_task_acc);
+
+	std::cout << "[" << contactState << "] " << stateMachine << " ( LEFT_CONTACT: " << LEFT_CONTACT << ", RIGHT_CONTACT: " << RIGHT_CONTACT << " )" << std::endl;
+	if(stateMachine == DOUBLE_STANCE) {
+		////// Task 0 : Set Contact Jacobian & no swing trajectory
+		kinWBC.setContactJacobianSize(2);
+		kinWBC.J_c.block(0, 0, 3, TOTAL_DOF) = Jp_EE[0];
+		kinWBC.J_c.block(3, 0, 3, TOTAL_DOF) = Jp_EE[1];
+		kinWBC.Jdot_c.block(0, 0, 3, TOTAL_DOF) = Jdotp_EE[0];
+		kinWBC.Jdot_c.block(3, 0, 3, TOTAL_DOF) = Jdotp_EE[1];
+	}
+	else if(stateMachine == LEFT_CONTACT) {
+		////// Task 0 : Set Contact Jacobian
+		kinWBC.setContactJacobianSize(1);
+		kinWBC.J_c = Jp_EE[0];
+		kinWBC.Jdot_c = Jdotp_EE[0];
+		////// Task 3: Swing Foot Trajectory Tracking
+		kinWBC.assignTask(3, Jp_EE[1], Jdotp_EE[1], p_EE[1], p_EE_d[1], pdot_EE_d[1], pddot_EE_d[1]);
 	}
 	else if(stateMachine == RIGHT_CONTACT) {
-		// TASK 0: Supporting Leg
-		J_task[0] = Jp_EE[1];
-		Jdot_task[0] = Jdotp_EE[1];
-		task_x[0] = p_EE[1];
-		task_x_d[0] = p_EE_d[1];
-		task_xdot_d[0] = pdot_EE_d[1];
-		task_xddot_d[0] = pddot_EE_d[1]; 
-		// TASK 3: Swing Leg
-		J_task[1] = Jp_EE[0];
-		Jdot_task[1] = Jdotp_EE[0];
-		task_x[1] = p_EE[0];
-		task_x_d[1] = p_EE_d[0];
-		task_xdot_d[1] = pdot_EE_d[0];
-		task_xddot_d[1] = pddot_EE_d[0];
+		////// Task 0 : Set Contact Jacobian
+		kinWBC.setContactJacobianSize(1);
+		kinWBC.J_c = Jp_EE[1];
+		kinWBC.Jdot_c = Jdotp_EE[1];
+		////// Task 3: Swing Foot Trajectory Tracking
+		kinWBC.assignTask(3, Jp_EE[0], Jdotp_EE[0], p_EE[0], p_EE_d[0], pdot_EE_d[0], pddot_EE_d[0]);
 	}
-
-	// TASK 1: Maintaining Posture  --> Check needed
-	J_task[3] = Jr_lnk[0];
-	Jdot_task[3] = Jdotr_lnk[0];
-	task_x[3] = robot.R_B.eulerAngles(0, 1, 2);
-	task_x_d[3] = {0.0, 0.0, 0.0,};
-	task_xdot_d[3] = {0.0, 0.0, 0.0,};
-	task_xddot_d[3] = {0.0, 0.0, 0.0,};
-
-	// TASK 2: Maintaining CoM Position
-	J_task[2] = robot.J_CoM;
-	Jdot_task[2] = robot.Jdot_CoM;
-	task_x[2] = robot.p_CoM;
-	task_x_d[2] = desired_com_pos;
-	task_xdot_d[2] = desired_com_vel;
-	task_xddot_d[2] = desired_com_acc;
-
-	// re-initialize variables for recursive task-priority kinematics
-	delta_q.reserve(n_tasks);
-	qdot.reserve(n_tasks);
-	qddot.reserve(n_tasks);
-	J_pre.reserve(n_tasks);
-	N.reserve(n_tasks);
-	N_pre.reserve(n_tasks);
-
-	for(int i=0; i<n_tasks; i++) {
-		delta_q[i].setZero();
-		qdot[i].setZero();
-		qddot[i].setZero();
-		J_pre[i].setZero();
-		N[i].setZero();
-		N_pre[i].setZero();
-	}
-
-	// std::cout << "----------------------------------------------------" << std::endl;
-	// Eigen::MatrixXd mp_J_psudo_inv;
-	// Eigen::MatrixXd svd_J_psudo_inv;
-	// mp_J_psudo_inv = J_task[0].completeOrthogonalDecomposition().pseudoInverse();
-	// svd_pseudoInverse(J_task[0], svd_J_psudo_inv);
-	// std::cout << "Moore Penrose PseudoInverse: \n" <<mp_J_psudo_inv << std::endl;
-	// std::cout << "SVD PseudoInverse: \n" << svd_J_psudo_inv << std::endl;
-	// std::cout << "Compare: \n" << (mp_J_psudo_inv - svd_J_psudo_inv).format(full_fmt) << std::endl;
-	// std::cout << "----------------------------------------------------" << std::endl << std::endl;
-
-	// Task 및 Desired Task를 한번씩 전부 출력해 볼 것.
-	// 첫자세에서는 어느정도 비슷한 값을 갖고 있어야 하는데, 그렇지 않다면 문제가 있는 것.
-	// 첫 initialize에 문제가 있거나, com 높이에 문제가 있을 수도 있고, 어떤 frame에서 바라본 값들인지에 대한 확인도 필요 할 것
-	// 그게 전부 정확하다면 무조건 아래 recursive loop에서 문제가 있는 것, 그러니 한번 값들 task값들 한번 출력해 볼 것.
-
-	delta_q[0].setZero();
-	qdot[0].setZero();
-	qddot[0] = J_task[0].completeOrthogonalDecomposition().pseudoInverse() * (-J_task[0] * robot.xidot);
-	N[0] = Eigen::MatrixXd::Identity(TOTAL_DOF, TOTAL_DOF) - J_task[0].completeOrthogonalDecomposition().pseudoInverse() * J_task[0];
-
-	std::cout << "stateMachine: " << ((stateMachine == LEFT_CONTACT)? "LEFT CONTACT: ":"RIGHT CONTACT: ") << std::endl;
-	std::cout << "--------------------------------------TASK 0--------------------------------------" << std::endl;
-	std::cout << "Jc" << std::endl << J_task[0].format(fmt) << std::endl;
-	std::cout << "Jc_pinv" << std::endl << J_task[0].completeOrthogonalDecomposition().pseudoInverse().format(fmt) << std::endl;
-	std::cout << "N0 = I - Jc_pinv * Jc" << std::endl << N[0].format(fmt) << std::endl;
-
-	for(int i = 1; i<n_tasks; i++) 
-	{
-		////// Priority: TASK 1 ~ N
-		std::cout << "--------------------------------------TASK " << i << "--------------------------------------" << std::endl;
-		J_pre[i] = J_task[i] * N[i-1];
-		Eigen::MatrixXd J_pre_pinv;
-		svd_pseudoInverse(J_pre[i], J_pre_pinv);
-
-		delta_q[i] = delta_q[i-1] + J_pre_pinv * (task_x_d[i] - task_x[i] - J_task[i] * delta_q[i-1]);
-		qdot[i] = qdot[i-1] + J_pre_pinv * (task_xdot_d[i] - J_task[i] * qdot[i-1]);
-		qddot[i] = qddot[i-1] + J_pre_pinv * (task_xddot_d[i] - Jdot_task[i] * robot.xidot - J_task[i] * qddot[i-1]);
-
-		std::cout << "J" << i << std::endl << J_task[i].format(fmt) << std::endl;
-		std::cout << "N" << i-1 << std::endl << N[i-1].format(fmt) << std::endl;
-		std::cout << "J_pre = J" << i << "N" << i-1 << std::endl << J_pre[i].format(fmt) << std::endl;
-		std::cout << "J_pre_pinv" << std::endl << J_pre_pinv.format(fmt) << std::endl;
-		std::cout << "delta_q" << i << std::endl << delta_q[i].transpose().format(fmt) << std::endl;
-
-		N_pre[i] = Eigen::MatrixXd::Identity(TOTAL_DOF, TOTAL_DOF) - J_pre_pinv * J_pre[i];
-		N[i] = N[i-1] * N_pre[i];
-	}
-
-	// qpos_d = robot.q + delta_q.back().segment(6, ACTIVE_DOF);
-	// qvel_d = qdot.back().segment(6, ACTIVE_DOF);
-	// qacc_d = qddot.back().segment(6, ACTIVE_DOF);
-	qpos_d = robot.q + delta_q[3].segment(6, ACTIVE_DOF);
-	qvel_d = qdot[3].segment(6, ACTIVE_DOF);
-	qacc_d = qddot[3].segment(6, ACTIVE_DOF);
-
-	std::cout << "---------------------------------------------------------------------" << std::endl;
-	std::cout << "[computeTaskPriorityKinematics] qpos_d: " << qpos_d.transpose().format(fmt) << std::endl;
-	std::cout << "[computeTaskPriorityKinematics] qvel_d: " << qvel_d.transpose().format(fmt) << std::endl;
-	std::cout << "[computeTaskPriorityKinematics] qacc_d: " << qacc_d.transpose().format(fmt) << std::endl << std::endl;
-
+	kinWBC.computeKinWBC(robot);
+	kinWBC.checkComputation();
 
 
 	//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 	/////// @todo : 5) DynWBC, solve qp to find delta qddot and delta contact force, finding optimal solution
 	//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-	torq_ff.setZero();
-	// qpos_d.setZero();
-	// qvel_d.setZero();
-	// qddot_d +=  qddot_delta
-	// F_C = f_qp + f_delta
-	// torq_ff = M_mat_q * xi_ddot_C + C_mat_q * robot.xidot + g_vec_q;
-	// for(int i=0; i < # of contact; i++) {
-	//	 joint_torq += J_C * F_C;
-	// }
-	// std::cout << "---------------------------------------------------------------------" << std::endl;
-	// std::cout << "[computeDynamicLevelWBC] torq_ff: " << torq_ff.transpose().format(fmt) << std::endl;
-	// std::cout << "[computeDynamicLevelWBC] delta_f: " << delta_f.transpose().format(fmt) << std::endl;
-	// std::cout << "[computeDynamicLevelWBC] delta_rho: " << delta_rho.transpose().format(fmt) << std::endl;
+	std::cout << "-------------------------------------------- [computeDynamicLevelWBC] --------------------------------------------" << std::endl;
+	qddot_cmd.setZero();
+	qddot_cmd.segment(6, 6) = kinWBC.qacc_d + Kd_qcmd * (kinWBC.qvel_d - robot.qdot) + Kp_qcmd * (kinWBC.qpos_d - robot.q);
+	std::cout << "[qacc_cmd] qpos_d: " << kinWBC.qpos_d.transpose().format(fmt) << std::endl;
+	std::cout << "[qacc_cmd] robot.q: " << robot.q.transpose().format(fmt) << std::endl;
+	std::cout << "[qacc_cmd] qvel_d: " << kinWBC.qvel_d.transpose().format(fmt) << std::endl;
+	std::cout << "[qacc_cmd] robot.xidot: " << robot.xidot.segment(6,6).transpose().format(fmt) << std::endl;
+	std::cout << "[qacc_cmd] qacc_d: " << kinWBC.qacc_d.transpose().format(fmt) << std::endl;
+	std::cout << "[qacc_cmd] qddot_cmd: " << qddot_cmd.transpose().format(fmt) << std::endl;
 
+	if(stateMachine == DOUBLE_STANCE) {
+		dynWBC.setQPSize(24, 18, 12);
+		dynWBC.setGain(1000, 10);
+	}
+	else if(stateMachine == LEFT_CONTACT) {
+		dynWBC.setQPSize(18, 15, 6);
+		dynWBC.setGain(1000, 5);
+	}
+	else if(stateMachine == RIGHT_CONTACT) {
+		dynWBC.setQPSize(18, 15, 6);
+		dynWBC.setGain(1000, 5);
+	}
+	dynWBC.computeDynWBC(robot, qddot_cmd, CCoMDynamics.opt_rho, kinWBC.J_c, kinWBC.Jdot_c);
+	dynWBC.checkComputation();
+	qddot = qddot_cmd + dynWBC.delta_qddot;
+	rho = CCoMDynamics.opt_rho + dynWBC.delta_rho;
+	f = dynWBC.Ubar * dynWBC.R_C * rho;
+
+	std::cout << "[ command ] qddot: " << qddot.transpose().format(fmt) << std::endl;
+	std::cout << "[ command ]  rho : " << rho.transpose().format(fmt) << std::endl;
+	if(stateMachine == DOUBLE_STANCE) {
+		std::cout << "[ command ] lfoot_f : " << f.head(3).transpose().format(fmt) << std::endl;
+		std::cout << "[ command ] rfoot_f : " << f.tail(3).transpose().format(fmt) << std::endl;
+	}
+	else if(stateMachine == LEFT_CONTACT)	std::cout << "[ command ] lfoot_f : " << f.head(3).transpose().format(fmt) << std::endl;
+	else if(stateMachine == RIGHT_CONTACT)	std::cout << "[ command ] rfoot_f : " << f.tail(3).transpose().format(fmt) << std::endl;
+
+	M_mat_q = robot.M_mat.block(DOF6, 0, ACTIVE_DOF, TOTAL_DOF);
+	C_mat_q = robot.C_mat.block(DOF6, 0, ACTIVE_DOF, TOTAL_DOF);
+	g_vec_q = robot.g_vec.block(DOF6, 0, ACTIVE_DOF, 1);
+
+	torq_ff.setZero();
+	torq_ff = M_mat_q * qddot + C_mat_q * robot.xidot + g_vec_q;
+	torq_ff -= (kinWBC.J_c.transpose() * f).segment<6>(6);
+	std::cout << "[ command ] torq_ff : " << torq_ff.transpose().format(fmt) << std::endl;
+	// CLogger.DynWBC_LOG.add(sim_time, qddot(6), qddot(7), qddot(8), qddot(9), qddot(10), qddot(11), torq_ff(0), torq_ff(1), torq_ff(2), torq_ff(3), torq_ff(4), torq_ff(5));
 
 
 	//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 	/////// @todo : 6) Joint Level Controller
 	//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-	joint_torq = torq_ff + K_qp * (qpos_d - robot.q) + K_qv * (qvel_d - robot.qdot);
-	std::cout << "---------------------------------------------------------------------" << std::endl;
-	std::cout << "[computeJointLevelController] joint_torq: " << joint_torq.transpose().format(fmt) << std::endl << std::endl;
+	joint_torq.setZero();
+	// torq_ff.setZero();
+	joint_torq = torq_ff + Kp_q * (kinWBC.qpos_d - robot.q) + Kd_q * (kinWBC.qvel_d - robot.qdot);
+	// joint_torq = torq_ff;
+
+	std::cout << "-------------------------------------------- [JointLevelController] --------------------------------------------" << std::endl;
+	std::cout << "[ " << GREEN << sim_time << RESET << " ]" << "[ " << contactState << " ]" << \
+				"[computeJointLevelController] joint_torq: " << joint_torq.transpose().format(fmt) << std::endl << std::endl << std::endl;
+	CLogger.JointTorque_LOG.add(sim_time, joint_torq(0), joint_torq(1), joint_torq(2), joint_torq(3), joint_torq(4), joint_torq(5));
+	CLogger.CoM_LOG.add(sim_time, robot.p_CoM(0), robot.p_CoM(1), robot.p_CoM(2));
+	CLogger.SWING.add(sim_time, p_EE[0](0), p_EE[0](1), p_EE[0](2), p_EE[1](0), p_EE[1](1), p_EE[1](2));
 }
 
 
@@ -748,6 +624,7 @@ void CRobotControl::computeCoMMotion()
 }
 
 
+
 ////////////////////////////////////////////////////////////////////////////////
 //	Compute End-effector Kinematics w.r.t {I}
 //	 * Pose, CoM Jacobian and its time derivative
@@ -797,7 +674,6 @@ void CRobotControl::computeEEKinematics(Eigen::Matrix<double, TOTAL_DOF, 1>& xid
 Eigen::Matrix<double, DOF3, TOTAL_DOF> Pre_Jp_EE_mj[NO_OF_ENDEFFECTOR], Pre_Jr_EE_mj[NO_OF_ENDEFFECTOR];
 Eigen::Matrix<double, DOF3, TOTAL_DOF> Pre_Jp_lnk_mj[NO_OF_BODY], Pre_Jr_lnk_mj[NO_OF_BODY];
 Eigen::Matrix<double, DOF3, TOTAL_DOF> Pre_Jp_lnkCoM_mj[NO_OF_BODY];
-
 void CRobotControl::compareModelComputation(const mjModel* uModel, mjData* uData, const int& count)
 {
 	int i, j, k;

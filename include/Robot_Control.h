@@ -2,8 +2,7 @@
 
 #include <chrono>
 #include <fstream>
-
-#include <csvpp/Write.h>
+#include <yaml-cpp/yaml.h>
 
 #include "ARBMLlib/ARBML.h"
 #include "Contact/ContactWrenchCone.h"
@@ -11,58 +10,35 @@
 #include "Trajectory/Opt_Trajectory_EE.h"
 #include "Trajectory/polynomial_end_effector_trajectory.hpp"
 #include "WalkingPatternGeneration/WalkingPatternGeneration.h"
+// #include "WalkingPatternGeneration/dcm_vrp_planner.hpp"
 
-#include "QuadProgpp/QuadProg++.h"	// Centoridal Dynamics
+#include "QuadProgpp/QuadProg++.h"
+#include "WalkingPatternGeneration/reactive_stepper.hpp"
+#include "LocomotionController/ReactionForce.hpp"
+#include "LocomotionController/KinWBC.hpp"
+#include "LocomotionController/DynWBC.hpp"
+
+#include "Logger/log.hpp"
 
 using namespace std;
-
-#define FUNC_TAG "[" << __func__ << "] "
-#define RESET "\033[0m"
-#define RED "\033[31m"  /* Red */
-#define BLUE "\033[34m" /* Blue */
-const Eigen::IOFormat fmt(Eigen::StreamPrecision, 0, ", ", "\n", "[ ", " ]");
-const Eigen::IOFormat full_fmt(Eigen::FullPrecision, 0, ", ", "\n", "[ ", " ]");
-
-//	Time Variables
-constexpr sysReal TIME_START = 3.0;				//	Second
-constexpr sysReal TIME_TASK_EXECUTION = 2.0;	//	Second
-
 
 //	Multiple of Simulation Step(Forward dynamics) > 1
 constexpr int CONTROL_RATE = 1;
 
-
-//	Control Related ...
-enum control_list
-{
-	noControl = 0,
-	PointJointPD,
-	TrackingJointPD
-};
-
-
-//	Task List
-enum task_list
-{
-	noControlSubtask = 0,
-	task_standing
-};
-
 // Gait State
 typedef enum{
-  SINGLE_STANCE     = 0X00,
+  SINGLE_STANCE     = 0X00, // single stance
   RIGHT_CONTACT     = 0X01, // right leg contact (double: 1)
   LEFT_CONTACT      = 0X02, // left leg contact (double: 2)
   DOUBLE_STANCE     = 0X03, // both leg contact
 }stateMachineTypeDef;
 
-
 class CRobotControl
 {
 private:
-	CARBML robot;
-
 public:
+
+	CARBML robot;
 	CRobotControl();
 	~CRobotControl() {}
 
@@ -75,6 +51,7 @@ public:
 	//////////	Active joint variables	//////////
 	Eigen::Matrix<double, ACTIVE_DOF, 1>			joint_torq;					//	Active joint torque
 	Eigen::Matrix<double, ACTIVE_DOF, 1>			qpos_d, qvel_d, qacc_d;		//	Desired position & velocity of active joint
+	Eigen::Matrix<double, TOTAL_DOF, 1>				q_d, qdot_d, qddot_d;		//	Desired position & velocity of total joint
 
 	Eigen::Matrix<double, ACTIVE_DOF, ACTIVE_DOF> 	K_qp, K_qv;					//	Joint gain matrices for active joint
 
@@ -115,99 +92,68 @@ public:
 	///////////////////////////////////////////////////////////////////////////
 	// Command on Robot
 	Eigen::Vector3d		des_lin_vel; // desired linear velocity of the robot
-	Eigen::Vector3d		des_ang_vel; // desired angular velocity of the robot
 	double sim_time;
 	double prev_sim_time;
 
 	stateMachineTypeDef stateMachine;
 	stateMachineTypeDef prev_state;
+	std::string contactState;
+	std::string tmp_contactState;
 
+	////////////////////////////////
 	// Walking Pattern Generation
+	////////////////////////////////
 	WalkingPatternGeneration	WPG;
-	bool succeed;
 	double step_time;
 	double moving_time;
-	Eigen::Vector3d desired_com_pos;
-	Eigen::Vector3d desired_com_vel;
-	Eigen::Vector3d desired_com_acc;
 
+	////////////////////////////////
 	// Swing Foot Trajectory Generation
-	PolynomialEndEffectorTrajectory trajectory;
+	////////////////////////////////
+	ReactiveStepper reactive_stepper;
+	Eigen::Vector3d 			p_CoM_d;
+	Eigen::Vector3d 			pdot_CoM_d;
+	Eigen::Vector3d 			pddot_CoM_d;
 	vector<Eigen::Vector3d>		prev_p_EE_d;
 	vector<Eigen::Vector3d>		next_p_EE_d;
 	vector<Eigen::Vector3d>		p_EE_d;
 	vector<Eigen::Vector3d>		pdot_EE_d;
 	vector<Eigen::Vector3d>		pddot_EE_d;
 
+	////////////////////////////////
+	// Gain
+	////////////////////////////////
+	Eigen::MatrixXd Kp_qcmd, Kd_qcmd;
+	Eigen::MatrixXd Kp_q, Kd_q;
+
+	////////////////////////////////
 	// Centroidal Dyanmics
-	Eigen::Matrix3d Kp_p, Kd_p, Kp_omega, Kd_omega;
-	Eigen::Vector3d pddot_c_d;
-	Eigen::Vector3d omegadot_b_d;
-	Eigen::Vector3d g_vec;
-	Eigen::Matrix3d R_C_left, R_C_right;
-	Eigen::Matrix<double, 6, 6> 	R_C;
-	Eigen::Matrix<double, 6, 6> 	A;
-	Eigen::Matrix<double, 6, 1> 	b_d;
-	Eigen::Matrix<double, 6, 12>	C_contact_cone;
-	Eigen::Matrix<double, 6, 1>		f;
-	Eigen::Matrix<double, 6, 12>	f_prime;
-
-	Cquadprogpp<12, 12, 12> 		f_qp;
-	Eigen::Matrix<double, 6, 6>		S;		// Weighting matrix for CoM dynamics
-	double							alpha;	// force normalization factor
-	Eigen::Matrix<double, 12, 1> 	opt_rho;
-	Eigen::Matrix<double, 12, 12>	G, Ce, Ci;
-	Eigen::Matrix<double, 12, 1>	g0, ce, ci;
-
-	// Contact
-	CContactWrenchCone	ContactWrench;
-
-
 	// Task-Priority-based Kinematics Control
-	int n_tasks;
-	vector<Eigen::Vector3d> task_x;
-	vector<Eigen::Vector3d> task_x_d;
-	vector<Eigen::Vector3d> task_xdot_d;
-	vector<Eigen::Vector3d> task_xddot_d;
-	vector<Eigen::Matrix<double, DOF3, TOTAL_DOF>> J_task;
-	vector<Eigen::Matrix<double, DOF3, TOTAL_DOF>> Jdot_task;
-
-	vector<Eigen::Matrix<double, TOTAL_DOF, 1>> delta_q;
-	vector<Eigen::Matrix<double, TOTAL_DOF, 1>> qdot;
-	vector<Eigen::Matrix<double, TOTAL_DOF, 1>> qddot;
-	vector<Eigen::Matrix<double, DOF3, TOTAL_DOF>> J_pre;
-	vector<Eigen::Matrix<double, TOTAL_DOF, TOTAL_DOF>> N;
-	vector<Eigen::Matrix<double, TOTAL_DOF, TOTAL_DOF>> N_pre;
-
-
 	// Dynamics Level WBC using Quadratic Programming to find delta values
+	////////////////////////////////
+	CoMDynamics 	CCoMDynamics;
+	KinWBC 			kinWBC;
+	DynWBC 			dynWBC;
+
+	Eigen::Matrix<double, ACTIVE_DOF, TOTAL_DOF> M_mat_q;
+	Eigen::Matrix<double, ACTIVE_DOF, TOTAL_DOF> C_mat_q;
+	Eigen::Matrix<double, ACTIVE_DOF, 1>		 g_vec_q;
+
+	Eigen::Matrix<double, TOTAL_DOF, 1> 	qddot_cmd;
 	Eigen::Matrix<double, ACTIVE_DOF, 1>	torq_ff;
-	Eigen::Matrix<double, 6, 1> 			delta_f;
-	Eigen::Matrix<double, 12, 1> 			delta_rho;
-	Eigen::Matrix<double, ACTIVE_DOF, 1>	delta_qddot;
+	Eigen::VectorXd							qddot;
+	Eigen::VectorXd							rho;
+	Eigen::VectorXd							f;
 
-
-	// LOGGER
-    std::string path_swing = "/Users/junyoungkim/workspaces/dynamic_locomotion/log/EEposition.csv";
-	csvpp::Writer<double, double, double, double, double, double, double, double, double, double, double, double, double, double, double, double, double, double, double> SWING{
-        // destination file
-        path_swing,
-        // headers
-        "dt", "left_x", "left_y", "left_z", "right_x", "right_y", "right_z", "left_xdot", "left_ydot", "left_zdot", "right_xdot", "right_ydot", "right_zdot", "left_xddot", "left_yddot", "left_zddot", "right_xddot", "right_yddot", "right_zddot"
-    };
-	std::string path_task = "/Users/junyoungkim/workspaces/dynamic_locomotion/log/ssss.csv";
-    csvpp::Writer<double, double, double, double, double, double, double, double, double, double, double, double, double, double, double, double, double, double, double, double> EE_POS{
-        // destination file
-        path_task,
-        // headers
-        "dt", "left_EE_X", "left_EE_Y", "left_EE_Z", "right_EE_X", "right_EE_Y", "right_EE_Z", "DCM_OFFSET_X", "DCM_OFFSET_Y", "DCM_OFFSET_Z", "DCM_X", "DCM_Y", "COM_X", "COM_Y", "LEFT_SWING_X", "LEFT_SWING_Y", "LEFT_SWING_Z", "RIGHT_SWING_X", "RIGHT_SWING_Y", "RIGHT_SWING_Z"
-    };
+	////////////////////////////////
+	// Logger
+	////////////////////////////////
+	Logger CLogger;
 
 	//////////	Functions	//////////
 	void InitializeSystem(const mjModel* model_mj);
 	void initEEParameters(const mjModel* model);
 	void initCtrlParameters(const mjModel* model_mj);
-	void initLocomotionVariables();
 	void outputEEInformation();
 
 	void UserControl(mjModel* uModel, mjData* uData);
@@ -218,57 +164,114 @@ public:
 	void computeEEKinematics(Eigen::Matrix<double, TOTAL_DOF, 1>& xidot);
 	void computeLinkKinematics();	//	Compute kinematics and Jacobian, Jdot, etc
 
+	//	Check code validaty
+	void compareModelComputation(const mjModel* model, mjData* data, const int& count);
+
 	/////////// Extra Functions ///////////
+	void contactEstimator();
 	void computeCentroidalDynamics(stateMachineTypeDef stateMachine);
-	void assignTaskPriority(stateMachineTypeDef stateMachine);
+	void assignTaskPriority(int n_task, stateMachineTypeDef stateMachine);
 	void computeTaskPriorityKinematics();
 	void computeDynamicLevelWBC();
 
-	void svd_pseudoInverse(Eigen::MatrixXd Matrix, Eigen::MatrixXd& invMatrix)
+	Eigen::Quaterniond QuatMultiply(const Eigen::Quaterniond & q1, const Eigen::Quaterniond & q2)
 	{
-		Eigen::JacobiSVD<Eigen::MatrixXd> svd(Matrix, Eigen::ComputeThinU | Eigen::ComputeThinV);
-		Eigen::VectorXd S = svd.singularValues();
+			Eigen::Quaterniond ret_q;
+			
+			// IJRR
+            ret_q.w() = q1.w()*q2.w() - q1.x()*q2.x() - q1.y()*q2.y() - q1.z()*q2.z(),
+            ret_q.x() = q1.w()*q2.x() + q1.x()*q2.w() + q1.y()*q2.z() - q1.z()*q2.y(),
+            ret_q.y() = q1.w()*q2.y() - q1.x()*q2.z() + q1.y()*q2.w() + q1.z()*q2.x(),
+            ret_q.z() = q1.w()*q2.z() + q1.x()*q2.y() - q1.y()*q2.x() + q1.z()*q2.w();
+			
+            // ret_q.w() = q1.w()*q2.w() + q1.x()*q2.x() + q1.y()*q2.y() + q1.z()*q2.z(),
+            // ret_q.x() = -q1.w()*q2.x() + q1.x()*q2.w() - q1.y()*q2.z() + q1.z()*q2.y(),
+            // ret_q.y() = -q1.w()*q2.y() + q1.x()*q2.z() + q1.y()*q2.w()  q1.z()*q2.x(),
+            // ret_q.z() = -q1.w()*q2.z() - q1.x()*q2.y() + q1.y()*q2.x() + q1.z()*q2.w();
 
-		Eigen::VectorXd Sinv = S;
-		for (int i = 0; i < S.size(); i++)
-		{
-			if (S(i) > 0.0001)
-				Sinv(i) = 1.0 / S(i);
-			else
-				Sinv(i) = 0.0;
-		}
+			// ret_q.w() = q1.w() * q2.w() + q1.x() * q2.x() + q1.y() * q2.y() + q1.z() * q2.z();
+			// ret_q.x() = q1.w() * q2.x() - q1.x() * q2.w() - q1.y() * q2.z() + q1.z() * q2.y();
+			// ret_q.y() = q1.w() * q2.y() + q1.x() * q2.z() - q1.y() * q2.w() - q1.z() * q2.x();
+			// ret_q.z() = q1.w() * q2.z() - q1.x() * q2.y() + q1.y() * q2.x() - q1.z() * q2.w();
 
-		invMatrix = svd.matrixV() * Sinv.asDiagonal() * svd.matrixU().transpose();		
+			if(ret_q.w() < 0){
+				ret_q.w() *= -1.;
+				ret_q.x() *= -1.;
+				ret_q.y() *= -1.;
+				ret_q.z() *= -1.;
+			}
+
+			return ret_q;
 	}
 
-	bool checkMatrixRank_svdMethod(Eigen::MatrixXd Matrix)
+    void convert(Eigen::Quaterniond const & from, Eigen::Vector3d & to)
 	{
-		Eigen::JacobiSVD<Eigen::MatrixXd> svd(Matrix, Eigen::ComputeThinU | Eigen::ComputeThinV);
-		Eigen::VectorXd S = svd.singularValues();
+        double w = from.w();
+        Eigen::Vector3d img_vec;
+        img_vec[0] = from.x();
+        img_vec[1] = from.y();
+        img_vec[2] = from.z();
+        // double theta = 2.0*acos(w);
+        double theta = 2.0*asin(sqrt(img_vec[0] * img_vec[0] +
+                                     img_vec[1] * img_vec[1] +
+                                     img_vec[2] * img_vec[2]) );
+        
+        if(fabs(theta)<0.0000001) {
+            to = Eigen::Vector3d::Zero();
+            return ;
+        }
+        to = img_vec/sin(theta/2.0);
+        // printf("quaternion (theta, w, x, y, z): %f, %f, %f, %f, %f\n", theta, w, to[0], to[1], to[2]);
+        
+        // if(theta > M_PI){
+        //     theta -= 2*M_PI;
+        // }
+        // if(theta < -M_PI){
+        //     theta += 2*M_PI;
+        // }
+        to = to * theta;
+    }
 
-		for (int i = 0; i < S.size(); i++)
-		{
-			if (S(i) < 0.0001)
-				return false;
+	std::string vectorToString(const Eigen::VectorXd &vec) 
+	{
+		std::stringstream ss;
+		for (int i = 0; i < vec.size(); ++i) {
+			if (i > 0) ss << " ";
+			ss << vec[i];
 		}
+			return ss.str();
+	}
+
+	bool yamlReader()
+	{
+		YAML::Node yaml_node;
+		std::string path = CMAKE_SOURCE_DIR "/config/config.yaml";
+		try
+		{
+			yaml_node = YAML::LoadFile(path.c_str());
+
+			Kp_qcmd.resize(yaml_node["qcmd_gain"]["kp"].size(), yaml_node["qcmd_gain"]["kp"].size());
+			for(int i=0; i<yaml_node["qcmd_gain"]["kp"].size(); i++)
+				Kp_qcmd(i, i) = yaml_node["qcmd_gain"]["kp"][i].as<double>();
+			
+			Kd_qcmd.resize(yaml_node["qcmd_gain"]["kd"].size(), yaml_node["qcmd_gain"]["kd"].size());
+			for(int i=0; i<yaml_node["qcmd_gain"]["kd"].size(); i++)
+				Kd_qcmd(i, i) = yaml_node["qcmd_gain"]["kd"][i].as<double>();
+
+			Kp_q.resize(yaml_node["joint_level_gain"]["kp"].size(), yaml_node["joint_level_gain"]["kp"].size());
+			for(int i=0; i<yaml_node["joint_level_gain"]["kp"].size(); i++)
+				Kp_q(i, i) = yaml_node["joint_level_gain"]["kp"][i].as<double>();
+
+			Kd_q.resize(yaml_node["joint_level_gain"]["kd"].size(), yaml_node["joint_level_gain"]["kd"].size());
+			for(int i=0; i<yaml_node["joint_level_gain"]["kd"].size(); i++)
+				Kd_q(i, i) = yaml_node["joint_level_gain"]["kd"][i].as<double>();
+		}
+		catch(const std::exception& e)
+		{
+			std::cerr << "fail to read particle yaml file" <<std::endl;
+			exit(0);
+		}
+
 		return true;
 	}
-
-	bool checkMatrixRank_LUMethod(Eigen::MatrixXd Matrix)
-	{
-		int rank = Matrix.fullPivLu().rank();
-		int dim = std::min(Matrix.rows(), Matrix.cols());
-
-		if (rank == dim) {
-			std::cout << "Full rank matrix: " << rank << std::endl;
-			return true;
-		}
-		std::cout << "Deficient rank matrix: " << rank << std::endl;
-
-		return false;
-	}
-
-
-	//	Check code validaty
-	void compareModelComputation(const mjModel* model, mjData* data, const int& count);
 };

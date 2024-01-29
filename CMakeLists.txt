@@ -5,9 +5,9 @@ set(CMAKE_POLICY_DEFAULT_CMP0072 NEW)
 set(MSVC_INCREMENTAL_DEFAULT ON)
 
 project(
-  template_arbml
-  VERSION 2.3.7
-  DESCRIPTION "MuJoCo Template Repository using ARBML libaray"
+  dynamic_locmotion_controller
+  VERSION 3.1.2 # MuJoCo Version
+  DESCRIPTION "Dynamic Locomotion Controller Repository using ARBML libaray"
 )
 
 enable_language(C)
@@ -16,7 +16,6 @@ if(APPLE)
   enable_language(OBJC)
   enable_language(OBJCXX)
 endif()
-
 
 
 #################################
@@ -28,11 +27,11 @@ option(MUJOCO_BUILD_TESTS "Build tests for MuJoCo" OFF)
 option(MUJOCO_TEST_PYTHON_UTIL "Build and test utility libraries for Python bindings" ON)
 add_subdirectory(${PROJECT_SOURCE_DIR}/libraries/mujoco)                             # Add subdirectory
 add_subdirectory(${PROJECT_SOURCE_DIR}/libraries/qpoases)
+add_subdirectory(${PROJECT_SOURCE_DIR}/libraries/yaml-cpp)
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/libraries/mujoco/sample/cmake") # CMake Path append
 #################################
 # Open Libraries ENDS here
 #################################
-
 
 
 # Check if we are building as standalone project.
@@ -67,6 +66,7 @@ if(MUJOCO_HARDEN)
     endif()
   endif()
 endif()
+add_definitions(-DCMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 
 
 #################################
@@ -74,12 +74,15 @@ endif()
 #################################
 find_package(Eigen3 REQUIRED)
 find_package(eigen-quadprog REQUIRED)
+find_package(pinocchio REQUIRED)
 
 include(FetchContent)
 FetchContent_Declare(csvpp
 GIT_REPOSITORY https://github.com/andreacasalino/csvcpp
 GIT_TAG        main
 )
+set(BUILD_CSV_READER_SAMPLES OFF)
+set(BUILD_CSV_READER_TESTS OFF)
 FetchContent_MakeAvailable(csvpp)
 
 include_directories(
@@ -100,11 +103,16 @@ set(CONTACT_SRC
 )
 set(WPG_SRC 
   include/WalkingPatternGeneration/WalkingPatternGeneration.cpp
+  include/WalkingPatternGeneration/reactive_stepper.cpp
 )
 set(TRAJ_SRC 
   include/Trajectory/Trajectory.cpp
-  include/Trajectory/Opt_Trajectory_EE.cpp
   include/Trajectory/polynomial_end_effector_trajectory.cpp
+)
+set(LOCOMOTION_SRC
+  include/LocomotionController/ReactionForce.cpp
+  include/LocomotionController/KinWBC.cpp
+  include/LocomotionController/DynWBC.cpp
 )
 
 add_executable(template 
@@ -115,6 +123,7 @@ add_executable(template
   ${CONTACT_SRC}
   ${WPG_SRC}
   ${TRAJ_SRC}
+  ${LOCOMOTION_SRC}
 )
 target_include_directories(template PUBLIC
   ${CMAKE_SOURCE_DIR}/include
@@ -128,6 +137,8 @@ target_link_libraries(template
   lodepng
   eigen-quadprog::eigen-quadprog
   csvpp
+  yaml-cpp
+  pinocchio::pinocchio
 )
 target_compile_options(template PUBLIC ${MUJOCO_SIMULATE_COMPILE_OPTIONS})
 #################################

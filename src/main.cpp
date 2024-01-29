@@ -17,6 +17,64 @@
 namespace {
 //---------------------------------------- plugin handling -----------------------------------------
 
+void initalize_visualize(mj::Simulate& sim)
+{
+    sim.com_traj.clear();
+    sim.com_traj_d.clear();
+    sim.lfoot_traj_d.clear();
+    sim.rfoot_traj_d.clear();
+}
+
+void visualize_state_planner(mj::Simulate& sim)
+{
+  // std::cout << "[sim.cam] azm :"<< sim.cam.azimuth << std::endl;
+  // std::cout << "[sim.cam] elv :"<< sim.cam.elevation << std::endl;
+  // std::cout << "[sim.cam] dist:"<< sim.cam.distance << std::endl;
+
+  for(int i = 0; i < 3; ++i)
+  {
+    sim.pos_geom_com[i] = robot_control.robot.p_CoM(i);
+    sim.pos_geom_desired_lfoot[i] = robot_control.next_p_EE_d[0](i);
+    // sim.pos_geom_desired_rfoot[i] = robot_control.next_p_EE_d[1](i);
+    // sim.pos_geom_dcm_offset[i] = robot_control.WPG.dcm_offset(i);
+    sim.com[i] = robot_control.robot.p_CoM(i);
+    sim.com_d[i] = robot_control.p_CoM_d(i);
+    sim.lfoot_d[i] = robot_control.p_EE_d[0](i);
+    sim.rfoot_d[i] = robot_control.p_EE_d[1](i);
+  }
+
+  mjtNum* newarray_com = new mjtNum[3];
+  mjtNum* newarray_com_d = new mjtNum[3];
+  mjtNum* newarray_lfoot_d = new mjtNum[3];
+  mjtNum* newarray_rfoot_d = new mjtNum[3];
+  std::copy(std::begin(sim.com), std::end(sim.com), newarray_com);
+  std::copy(std::begin(sim.com_d), std::end(sim.com_d), newarray_com_d);
+  std::copy(std::begin(sim.lfoot_d), std::end(sim.lfoot_d), newarray_lfoot_d);
+  std::copy(std::begin(sim.rfoot_d), std::end(sim.rfoot_d), newarray_rfoot_d);
+
+  if(sim.com_traj.size() < sim.history) {
+    sim.com_traj.push_back(newarray_com);
+    sim.com_traj_d.push_back(newarray_com_d);
+    sim.lfoot_traj_d.push_back(newarray_lfoot_d);
+    sim.rfoot_traj_d.push_back(newarray_rfoot_d);
+  }
+  else if(sim.com_traj.size() == sim.history) {
+    sim.com_traj.push_back(newarray_com);
+    sim.com_traj_d.push_back(newarray_com_d);
+    sim.lfoot_traj_d.push_back(newarray_lfoot_d);
+    sim.rfoot_traj_d.push_back(newarray_rfoot_d);
+    delete[] sim.com_traj.front();
+    delete[] sim.com_traj_d.front();
+    delete[] sim.lfoot_traj_d.front();
+    delete[] sim.rfoot_traj_d.front();
+    sim.com_traj.pop_front();
+    sim.com_traj_d.pop_front();
+    sim.lfoot_traj_d.pop_front();
+    sim.rfoot_traj_d.pop_front();
+  }
+}
+
+
 // return the path to the directory containing the current executable
 // used to determine the location of auto-loaded plugin libraries
 std::string getExecutableDir() {
@@ -113,11 +171,6 @@ std::string getExecutableDir() {
 }
 
 
-// #if defined(_WIN32) || defined(__CYGWIN__)
-// using unique_dlhandle = std::unique_ptr<std::remove_pointer_t<HMODULE>, decltype(&FreeLibrary)>;
-// #else
-// using unique_dlhandle = std::unique_ptr<void, decltype(&dlclose)>;
-// #endif
 
 // scan for libraries in the plugin directory to load additional plugins
 void scanPluginLibraries() {
@@ -155,7 +208,9 @@ void scanPluginLibraries() {
       });
 }
 
+
 //------------------------------------------- simulation -------------------------------------------
+
 
 mjModel* LoadModel(const char* file, mj::Simulate& sim) {
   // this copy is needed so that the mju::strlen call below compiles
@@ -220,6 +275,7 @@ void PhysicsLoop(mj::Simulate& sim) {
   // run until asked to exit
   while (!sim.exitrequest.load()) {
     if (sim.droploadrequest.load()) {
+      sim.LoadMessage(sim.dropfilename);
       mjModel* mnew = LoadModel(sim.dropfilename, sim);
       sim.droploadrequest.store(false);
 
@@ -227,6 +283,9 @@ void PhysicsLoop(mj::Simulate& sim) {
       if (mnew) dnew = mj_makeData(mnew);
       if (dnew) {
         sim.Load(mnew, dnew, sim.dropfilename);
+
+        // lock the sim mutex
+        const std::unique_lock<std::recursive_mutex> lock(sim.mtx);
 
         mj_deleteData(d);
         mj_deleteModel(m);
@@ -239,16 +298,22 @@ void PhysicsLoop(mj::Simulate& sim) {
         free(ctrlnoise);
         ctrlnoise = (mjtNum*) malloc(sizeof(mjtNum)*m->nu);
         mju_zero(ctrlnoise, m->nu);
+      } else {
+        sim.LoadMessageClear();
       }
     }
 
     if (sim.uiloadrequest.load()) {
       sim.uiloadrequest.fetch_sub(1);
+      sim.LoadMessage(sim.filename);
       mjModel* mnew = LoadModel(sim.filename, sim);
       mjData* dnew = nullptr;
       if (mnew) dnew = mj_makeData(mnew);
       if (dnew) {
         sim.Load(mnew, dnew, sim.filename);
+
+        // lock the sim mutex
+        const std::unique_lock<std::recursive_mutex> lock(sim.mtx);
 
         mj_deleteData(d);
         mj_deleteModel(m);
@@ -261,6 +326,8 @@ void PhysicsLoop(mj::Simulate& sim) {
         free(ctrlnoise);
         ctrlnoise = static_cast<mjtNum*>(malloc(sizeof(mjtNum)*m->nu));
         mju_zero(ctrlnoise, m->nu);
+      } else {
+        sim.LoadMessageClear();
       }
     }
 
@@ -280,6 +347,8 @@ void PhysicsLoop(mj::Simulate& sim) {
       if (m) {
         // running
         if (sim.run) {
+          bool stepped = false;
+
           // record cpu time at start of iteration
           const auto startCPU = mj::Simulate::Clock::now();
 
@@ -319,10 +388,13 @@ void PhysicsLoop(mj::Simulate& sim) {
 
             ////////////////// USER CODE : START //////////////////
 						robot_control.UserControl(m, d);
+            initalize_visualize(sim);
+            visualize_state_planner(sim);
 						/////////////////// USER CODE : END ///////////////////
 
             // run single step, let next iteration deal with timing
             mj_step(m, d);
+            stepped = true;
           }
 
           // in-sync: step until ahead of cpu
@@ -344,10 +416,12 @@ void PhysicsLoop(mj::Simulate& sim) {
 
               ////////////////// USER CODE : START //////////////////
 							robot_control.UserControl(m, d);
+              visualize_state_planner(sim);
 							/////////////////// USER CODE : END ///////////////////
 
               // call mj_step
               mj_step(m, d);
+              stepped = true;
 
               // break if reset
               if (d->time < prevSim) {
@@ -355,12 +429,18 @@ void PhysicsLoop(mj::Simulate& sim) {
               }
             }
           }
+
+          // save current state to history buffer
+          if (stepped) {
+            sim.AddToHistory();
+          }
         }
 
         // paused
         else {
           // run mj_forward, to update rendering and joint sliders
           mj_forward(m, d);
+          sim.speed_changed = true;
         }
       }
     }  // release std::lock_guard<std::mutex>
@@ -373,16 +453,28 @@ void PhysicsLoop(mj::Simulate& sim) {
 void PhysicsThread(mj::Simulate* sim, const char* filename) {
   // request loadmodel if file given (otherwise drag-and-drop)
   if (filename != nullptr) {
+    sim->LoadMessage(filename);
     m = LoadModel(filename, *sim);
-    if (m) d = mj_makeData(m);
+    if (m) {
+      // lock the sim mutex
+      const std::unique_lock<std::recursive_mutex> lock(sim->mtx);
+
+      d = mj_makeData(m);
+    }
     if (d) {
       sim->Load(m, d, filename);
+
+      // lock the sim mutex
+      const std::unique_lock<std::recursive_mutex> lock(sim->mtx);
+
       mj_forward(m, d);
 
       // allocate ctrlnoise
       free(ctrlnoise);
       ctrlnoise = static_cast<mjtNum*>(malloc(sizeof(mjtNum)*m->nu));
       mju_zero(ctrlnoise, m->nu);
+    } else {
+      sim->LoadMessageClear();
     }
   }
 
@@ -393,7 +485,6 @@ void PhysicsThread(mj::Simulate* sim, const char* filename) {
   mj_deleteData(d);
   mj_deleteModel(m);
 }
-
 
 //------------------------------------------ main --------------------------------------------------
 
@@ -407,7 +498,8 @@ __attribute__((used, visibility("default"))) extern "C" void _mj_rosettaError(co
 #endif
 
 // run event loop
-int main(int argc, const char** argv) {
+int main(int argc, char** argv) {
+
   // display an error if running on macOS under Rosetta 2
 #if defined(__APPLE__) && defined(__AVX__)
   if (rosetta_error_msg) {
@@ -425,9 +517,6 @@ int main(int argc, const char** argv) {
   // scan for libraries in the plugin directory to load additional plugins
   scanPluginLibraries();
 
-  mjvScene scn;
-  mjv_defaultScene(&scn);
-
   mjvCamera cam;
   mjv_defaultCamera(&cam);
 
@@ -440,14 +529,14 @@ int main(int argc, const char** argv) {
   // simulate object encapsulates the UI
   auto sim = std::make_unique<mj::Simulate>(
       std::make_unique<mj::GlfwAdapter>(),
-      &scn, &cam, &opt, &pert, /* fully_managed = */ true
+      &cam, &opt, &pert, /* is_passive = */ false
   );
 
   ///////// Original Code //////////
 
   // const char* filename = nullptr;
   // if (argc >  1) {
-  //   filename = argv[1];
+    //   filename = argv[1];
   // }
 
 
@@ -471,7 +560,8 @@ int main(int argc, const char** argv) {
 #elif defined(ROBOT9)
 	const char* filename = "../model/Baxter/Baxter.xml";
 #elif defined(ROBOT10)
-  const char* filename = "../model/template_timing_torque.xml";
+  const char* filename = "../model/template_pointfoot_RRP.xml";    // Prismatic
+  // const char* filename = "../model/template_pointfoot_RRR.xml";    // Knee Revolute Joint
 #endif
 ////////////////////////////// USER CODE : END //////////////////////////////
 
