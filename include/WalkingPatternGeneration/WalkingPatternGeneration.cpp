@@ -98,8 +98,20 @@ void WalkingPatternGeneration::initialize_qp_param()
 void WalkingPatternGeneration::initialize_nominal_param()
 {
     min_L = -0.5;   max_L = 0.5;    // step length
-    min_W = -0.1;   max_W = 0.4;    // step width
+    min_W = -0.05;   max_W = 0.3;    // step width
     min_T = 0.2;    max_T = 0.8;    // step time
+
+    dcm_offset.setZero();
+    dcm_trajectory.setZero();
+    com_dot_trajectory.setZero();
+    com_ddot_trajectory.setZero();
+    com_trajectory.setZero();
+
+    // dcm_trajectory(2) = z0;
+    // com_trajectory(2) = z0;
+    // com_dot_trajectory(2) = 0;
+    // com_ddot_trajectory(2) = 0;
+    // dcm_offset(2) = z0;
 }
 
 void WalkingPatternGeneration::specifying_nominal_values(Eigen::Vector3d des_vel, double stateMachine)
@@ -230,8 +242,9 @@ void WalkingPatternGeneration::online_foot_time_placement()
 
 void WalkingPatternGeneration::com_trajectory_generation()
 {
+    // std::cout << com_trajectory << std::endl;
+    // std::cout << dcm_trajectory << std::endl;
     com_dot_trajectory = -omega * (com_trajectory - dcm_trajectory);
-    com_ddot_trajectory = com_dot_trajectory / control_period;
     com_trajectory = com_dot_trajectory * control_period + com_trajectory;
-    com_trajectory(2) = z0;
+    // com_ddot_trajectory = com_dot_trajectory / control_period;                      /// ? Need Check
 }

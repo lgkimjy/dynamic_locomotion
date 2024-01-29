@@ -10,7 +10,7 @@ public:
     ~WalkingPatternGeneration() {};
 
     // ROBOT PARAMETERS
-    double z0 = 0.785;              // height of COM
+    double z0 = 0.68;              // height of COM 0.68, base height full stretch 0.78
     double g = 9.81;                // gravity term
     double omega = sqrt(g / z0);    // natural frequency of the robot
     double leg_length = 0.5;        // length of leg ( prismatic length not included ) - need check again
@@ -45,7 +45,6 @@ public:
     double b_y = 0.0;
 
     double t_moving;
-
 
     // NOMINAL GAIT TIMING PARAMETER 
     double alpha1 = 1;
